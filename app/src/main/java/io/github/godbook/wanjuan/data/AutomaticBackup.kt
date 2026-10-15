@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.*
 import io.github.godbook.wanjuan.WanJuanApp
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
 
 class AutomaticBackup(context: Context,params: WorkerParameters): CoroutineWorker(context,params) {
@@ -12,12 +13,12 @@ class AutomaticBackup(context: Context,params: WorkerParameters): CoroutineWorke
         val dav=WebDav(applicationContext)
         if(dav.load()==null) return Result.failure()
         return try {
-            val file=Backup(app.library).create()
+            val file=Backup(app.library).create(includeOffline=app.library.preferences.first().optString("backupOffline","true")!="false")
             try {dav.upload(file);dav.retainLatest(10)} finally {file.delete()}
-            app.library.preference("lastAutomaticBackup",System.currentTimeMillis().toString())
+            app.library.backupResult()
             Result.success()
         } catch(e: CancellationException) {throw e}
-        catch(e: Exception) {app.library.preference("backupError",e.message ?: "备份失败");if(runAttemptCount<3) Result.retry() else Result.failure()}
+        catch(e: Exception) {app.library.backupResult(e.message ?: "备份失败");if(runAttemptCount<3) Result.retry() else Result.failure()}
     }
     companion object {
         fun schedule(context: Context,enabled: Boolean) {

@@ -41,9 +41,34 @@ data class Book(
             it.optBoolean("pinned"), it.text("localHash"), it.text("profile"), it.optBoolean("finished"))
     } }
 }
-data class Mark(val id: String = uid(), val bookId: String, val chapter: Int, val offset: Int, val quote: String, val note: String = "") {
-    fun encode() = JSONObject().put("id", id).put("bookId", bookId).put("chapter", chapter).put("offset", offset).put("quote", quote).put("note", note).toString()
-    companion object { fun decode(s: String) = JSONObject(s).let { Mark(it.getString("id"), it.getString("bookId"), it.getInt("chapter"), it.getInt("offset"), it.getString("quote"), it.text("note")) } }
+data class ReadingProgress(val chapter: Int, val offset: Int, val anchor: String, val updated: Long,
+    val sourceId: String? = null,val bookUrl: String? = null,val chapterId: String? = null) {
+    fun encode() = JSONObject().put("chapter",chapter).put("offset",offset).put("anchor",anchor).put("updated",updated)
+        .put("sourceId",sourceId).put("bookUrl",bookUrl).put("chapterId",chapterId).toString()
+    fun apply(book: Book): Book {
+        if(sourceId!=null && (sourceId!=book.sourceId || bookUrl!=book.url)) return book
+        val index=if(chapterId==null) chapter else book.chapters.indexOfFirst {it.id==chapterId}.takeIf {it>=0} ?: return book
+        return book.copy(chapter=index,offset=offset,anchor=anchor,updated=updated)
+    }
+    companion object {
+        fun from(book: Book) = ReadingProgress(book.chapter,book.offset,book.anchor,book.updated,book.sourceId,book.url,book.chapters.getOrNull(book.chapter)?.id)
+        fun decode(raw: String) = JSONObject(raw).let { ReadingProgress(it.getInt("chapter"),it.getInt("offset"),it.text("anchor"),it.getLong("updated"),
+            if(it.has("sourceId")) it.text("sourceId") else null,if(it.has("bookUrl")) it.text("bookUrl") else null,if(it.has("chapterId")) it.text("chapterId") else null) }
+    }
+}
+
+data class Mark(val id: String = uid(), val bookId: String, val chapter: Int, val offset: Int, val quote: String, val note: String = "",
+    val sourceId: String = "", val bookUrl: String = "", val chapterId: String = "", val chapterTitle: String = "", val needsReview: Boolean = false) {
+    fun encode() = JSONObject().put("id", id).put("bookId", bookId).put("chapter", chapter).put("offset", offset).put("quote", quote).put("note", note)
+        .put("sourceId",sourceId).put("bookUrl",bookUrl).put("chapterId",chapterId).put("chapterTitle",chapterTitle).put("needsReview",needsReview).toString()
+    fun withContext(book: Book, index: Int = chapter) = copy(chapter=index,sourceId=book.sourceId,bookUrl=book.url,
+        chapterId=book.chapters.getOrNull(index)?.id.orEmpty(),chapterTitle=book.chapters.getOrNull(index)?.title.orEmpty(),needsReview=false)
+    fun indexIn(book: Book): Int? {
+        if(needsReview || (chapterId.isNotBlank() && (sourceId!=book.sourceId || bookUrl!=book.url))) return null
+        return if(chapterId.isBlank()) chapter.takeIf {it in book.chapters.indices} else book.chapters.indexOfFirst {it.id==chapterId}.takeIf {it>=0}
+    }
+    companion object { fun decode(s: String) = JSONObject(s).let { Mark(it.getString("id"), it.getString("bookId"), it.getInt("chapter"), it.getInt("offset"), it.getString("quote"), it.text("note"),
+        it.text("sourceId"),it.text("bookUrl"),it.text("chapterId"),it.text("chapterTitle"),it.optBoolean("needsReview")) } }
 }
 data class Profile(
     val size: Float = 20f, val line: Float = 1.6f, val margin: Float = 24f, val paragraph: Float = 10f,

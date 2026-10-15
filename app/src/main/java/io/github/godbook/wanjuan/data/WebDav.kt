@@ -48,15 +48,20 @@ class WebDav(private val context: Context) {
     }.getOrNull()
     private fun base(c: DavConfig)=c.url.trimEnd('/')+"/"
     private fun headers(c: DavConfig)=mapOf("Authorization" to Credentials.basic(c.username,c.password))
-    suspend fun upload(file: File): String = withContext(Dispatchers.IO) {
+    suspend fun upload(file: File,progress: (String)->Unit = {}): String = withContext(Dispatchers.IO) {
         val c=load() ?: error("请先配置 WebDAV")
         val name="wanjuan-${System.currentTimeMillis()}-${deviceId}.zip"
         val url=base(c)+name
-        val bytes=file.readBytes()
+        require(file.length()<=Backup.MAX_TOTAL) {"备份超过 512MB"}
+        val digest=fileHash(file)
         val network=Network(privateHost=c.allowPrivate)
-        network.bytes(url,headers(c),"PUT",bytes.toRequestBody("application/zip".toMediaType()))
-        val remote=network.bytes(url,headers(c),limit=512L*1024*1024)
-        require(sha256(bytes)==sha256(remote)) { "远端备份校验失败" }
+        progress("正在上传 ${file.length()/1024/1024} MiB")
+        network.upload(url,file,headers(c))
+        val verified=File(context.cacheDir,"verify-${uid()}.zip")
+        try {
+            val remoteHash=network.download(url,verified,headers(c),Backup.MAX_TOTAL) {progress("正在校验远端 ${it/1024/1024} MiB")}
+            require(digest==remoteHash) {"远端备份校验失败"}
+        } finally {verified.delete()}
         name
     }
     suspend fun list(): List<String> = withContext(Dispatchers.IO) {
@@ -65,10 +70,12 @@ class WebDav(private val context: Context) {
         Jsoup.parse(xml,"",Parser.xmlParser()).allElements.filter { it.tagName().substringAfter(':') == "href" }.map { it.text().substringAfterLast('/') }
             .filter { it.matches(Regex("wanjuan-[0-9]+-[a-zA-Z0-9]+\\.zip")) }.distinct().sortedDescending()
     }
-    suspend fun download(name: String): File = withContext(Dispatchers.IO) {
+    suspend fun download(name: String,progress: (String)->Unit = {}): File = withContext(Dispatchers.IO) {
         require(name.matches(Regex("wanjuan-[0-9]+-[a-zA-Z0-9]+\\.zip")))
         val c=load() ?: error("请先配置 WebDAV")
-        File(context.cacheDir,"restore-webdav.zip").apply { writeBytes(Network(privateHost=c.allowPrivate).bytes(base(c)+name,headers(c),limit=512L*1024*1024)) }
+        val file=File(context.cacheDir,"restore-webdav-${uid()}.zip")
+        try {Network(privateHost=c.allowPrivate).download(base(c)+name,file,headers(c),Backup.MAX_TOTAL) {progress("正在下载 ${it/1024/1024} MiB")};file}
+        catch(e: Throwable) {file.delete();throw e}
     }
     suspend fun retainLatest(count: Int=10) {
         val c=load() ?: return

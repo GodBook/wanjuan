@@ -24,6 +24,7 @@ import io.github.godbook.wanjuan.*
 import io.github.godbook.wanjuan.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable fun SearchScreen(model: AppModel,onSources: ()->Unit) {
@@ -34,7 +35,7 @@ import java.io.File
     val done by model.searchDone.collectAsState()
     val errors by model.searchErrors.collectAsState()
     val searching by model.searching.collectAsState()
-    val histories by remember(model) { model.library.dao.observe("history") }.collectAsState(emptyList())
+    val histories by model.library.history.collectAsState(emptyList())
     val keyboard=LocalSoftwareKeyboardController.current
     var selected by remember { mutableStateOf<Book?>(null) }
     var showErrors by remember { mutableStateOf(false) }
@@ -57,9 +58,9 @@ import java.io.File
                         Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                             BuiltinSources.editions.forEach { edition -> SuggestionChip(onClick={query=edition.title;keyboard?.hide();model.search(query,group)},label={Text(edition.title)}) }
                         }
-                        if(histories.isNotEmpty()) Text("最近搜索",color=Muted,modifier=Modifier.padding(vertical=12.dp))
+                        if(histories.isNotEmpty()) Row(verticalAlignment=Alignment.CenterVertically) {Text("最近搜索",color=Muted,modifier=Modifier.weight(1f));TextButton(onClick={model.run {model.library.clearHistory()}}) {Text("清空历史")}}
                     }
-                    items(histories.takeLast(12).reversed()) { h -> ListItem(headlineContent={Text(h.id)},leadingContent={Icon(Icons.Outlined.History,null)},modifier=Modifier.clickable {query=h.id;model.search(query,group)}) }
+                    items(histories.take(12),key={it.id}) { h -> ListItem(headlineContent={Text(h.id)},leadingContent={Icon(Icons.Outlined.History,null)},modifier=Modifier.clickable {query=h.id;model.search(query,group)}) }
                 }
                 if(results.isEmpty() && !searching && done>0) item {Text("没有找到结果。可以尝试其他关键词，或查看书源失败信息。",Modifier.padding(vertical=28.dp),color=Muted)}
                 grouped.values.forEach { books -> item(key=books.first().id) {
@@ -104,18 +105,19 @@ import java.io.File
         ActionRow("修改名称与分组",Icons.Outlined.Edit) {selected=null;prompt=Prompt("书源信息","名称 | 分组","${s.name} | ${s.group}") { value -> val parts=value.split('|');model.run {model.library.save(s.copy(raw=s.json.put("bookSourceName",parts[0].trim()).put("bookSourceGroup",parts.getOrElse(1){"默认"}.trim()).toString()))} }}
         ActionRow("删除书源",Icons.Outlined.DeleteOutline) {selected=null;confirmDelete=s}
     } } }
-    confirmDelete?.let { s -> AlertDialog(onDismissRequest={confirmDelete=null},title={Text("删除 ${s.name}？")},text={Text("已缓存内容保留。使用此书源的书籍将需要换源才能获取新章节。")},confirmButton={TextButton(onClick={confirmDelete=null;model.run {model.library.dao.delete("source",s.id)}}) {Text("删除")}},dismissButton={TextButton(onClick={confirmDelete=null}) {Text("取消")}}) }
+    confirmDelete?.let { s -> AlertDialog(onDismissRequest={confirmDelete=null},title={Text("删除 ${s.name}？")},text={Text("已缓存内容保留。使用此书源的书籍将需要换源才能获取新章节。")},confirmButton={TextButton(onClick={confirmDelete=null;model.run {model.library.delete("source",s.id)}}) {Text("删除")}},dismissButton={TextButton(onClick={confirmDelete=null}) {Text("取消")}}) }
     prompt?.let {TextPrompt(it) {prompt=null}}
 }
 
-@Composable fun SettingsScreen(model: AppModel,dark: Int,onDark: (Int)->Unit,encoding: String,onEncoding: (String)->Unit,onSources: ()->Unit,onDownloads: ()->Unit,onBackup: ()->Unit,onRestore: ()->Unit,onDav: ()->Unit,onUpdate: ()->Unit,onReaderSettings: ()->Unit) {
+@Composable fun SettingsScreen(model: AppModel,dark: Int,onDark: (Int)->Unit,encoding: String,onEncoding: (String)->Unit,onSources: ()->Unit,onDownloads: ()->Unit,onBackup: ()->Unit,onRestore: ()->Unit,onDav: ()->Unit,onUpdate: ()->Unit,onReaderSettings: ()->Unit,onStorage: ()->Unit) {
     LazyColumn {
         item {PageHeader("设置","按自己的习惯，读每一本书。")}
         item {SectionLabel("阅读与外观");ActionRow("阅读设置",Icons.Outlined.TextFields,"字体、排版、主题与翻页",onReaderSettings)}
         item {Row(Modifier.padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf("跟随系统","浅色","深色").forEachIndexed { i,label -> FilterChip(dark==i,{onDark(i)},label={Text(label)})}}}
         item {SectionLabel("书库管理");ActionRow("书源管理",Icons.Outlined.Dns,"导入与管理多个书源",onSources);ActionRow("离线下载",Icons.Outlined.Download,"查看队列、暂停与继续",onDownloads);ActionRow("清理临时缓存",Icons.Outlined.CleaningServices,"保留本地书籍和明确下载的章节") {model.run("临时缓存已清理") {model.library.trimCache(0)}}}
+        item {ActionRow("存储管理",Icons.Outlined.Storage,"查看占用，选择删除下载和未使用文件",onStorage)}
         item {Text("TXT 导入编码",Modifier.padding(24.dp,8.dp),style=MaterialTheme.typography.bodyMedium);Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf("自动","UTF-8","GB18030","UTF-16LE","UTF-16BE").forEach { e -> FilterChip(encoding==e,{onEncoding(e)},label={Text(e)})}}}
-        item {SectionLabel("备份与恢复");ActionRow("导出备份",Icons.Outlined.SaveAlt,"包含书籍、书源、进度、笔记与阅读设置",onBackup);ActionRow("从文件恢复",Icons.Outlined.Restore,"校验后恢复完整快照",onRestore);ActionRow("WebDAV 备份",Icons.Outlined.CloudUpload,"使用你自己的云端存储",onDav)}
+        item {SectionLabel("备份与恢复");ActionRow("导出备份",Icons.Outlined.SaveAlt,"本地书籍、书源、笔记、设置，可含已下载正文",onBackup);ActionRow("从文件恢复",Icons.Outlined.Restore,"校验后恢复完整快照",onRestore);ActionRow("WebDAV 备份",Icons.Outlined.CloudUpload,"使用你自己的云端存储",onDav)}
         item {SectionLabel("关于万卷");ActionRow("检查更新",Icons.Outlined.SystemUpdate,"当前版本 ${BuildConfig.VERSION_NAME}",onUpdate)}
         item {Text("本地优先 · 无需账号\n内置经典书源，支持导入更多来源。\n书源兼容范围请查看仓库文档。",Modifier.padding(24.dp),color=Muted,style=MaterialTheme.typography.bodySmall)}
     }
@@ -126,12 +128,14 @@ import java.io.File
     val context=model.app
     val infos by WorkManager.getInstance(context).getWorkInfosByTagFlow("downloads").collectAsState(emptyList())
     val books by model.books.collectAsState()
+    val configs by remember(model) {model.library.dao.observe("download")}.collectAsState(emptyList())
     Column {
         PageHeader("离线下载","默认等待 Wi-Fi，系统可能延迟执行。",onBack)
         if(infos.isEmpty()) Text("在阅读菜单中选择缓存，即可离线阅读。",Modifier.padding(24.dp),color=Muted)
         LazyColumn {items(infos.groupBy {it.tags.firstOrNull {tag ->tag.startsWith("book:")}}.values.toList()) { all ->
-            val generation=all.maxOf {it.tags.firstOrNull {tag ->tag.startsWith("generation:")}?.substringAfter(':')?.toLongOrNull() ?: 0}
-            val batch=all.filter {(it.tags.firstOrNull {tag ->tag.startsWith("generation:")}?.substringAfter(':')?.toLongOrNull() ?: 0)==generation}
+            val bookId=all.first().tags.firstOrNull {it.startsWith("book:")}?.removePrefix("book:")
+            val spec=configs.find {it.id==bookId}?.let {DownloadSpec.decode(it.payload)}
+            val batch=if(spec!=null) all.filter {"generation:${spec.generation}" in it.tags}.ifEmpty {all} else all
             val info=batch.firstOrNull {it.state==androidx.work.WorkInfo.State.RUNNING} ?: batch.firstOrNull {it.state==androidx.work.WorkInfo.State.ENQUEUED} ?: batch.firstOrNull {it.state==androidx.work.WorkInfo.State.FAILED} ?: batch.first()
             val id=info.tags.firstOrNull {it.startsWith("book:")}?.removePrefix("book:")
             val b=books.find {it.id==id}
@@ -139,9 +143,15 @@ import java.io.File
             val done=batch.sumOf {if(it.state==androidx.work.WorkInfo.State.SUCCEEDED) it.tags.firstOrNull {tag ->tag.startsWith("batch:")}?.substringAfter(':')?.toIntOrNull() ?: 0 else it.progress.getInt("done",0)}
             val finished=batch.all {it.state==androidx.work.WorkInfo.State.SUCCEEDED}
             val active=batch.any {!it.state.isFinished}
-            ListItem(headlineContent={Text(b?.title ?: "书籍已移出书架")},supportingContent={Text("${if(finished) "下载完成" else when(info.state.name) {"ENQUEUED","BLOCKED" -> "等待执行";"RUNNING" -> "正在下载";"FAILED" -> "下载失败";else -> "已暂停"}} · $done / $total\n${info.outputData.getString("error").orEmpty()}")},trailingContent={
-                if(active) TextButton(onClick={WorkManager.getInstance(context).cancelUniqueWork("download:$id")}) {Text("暂停")}
-                else if(b!=null && !finished) TextButton(onClick={val range=info.tags.firstOrNull {it.startsWith("range:")}?.split(':');ChapterWorker.enqueue(context,b,range?.getOrNull(1)?.toIntOrNull() ?: b.chapter,range?.getOrNull(2)?.toIntOrNull() ?: b.chapters.lastIndex)}) {Text("继续")}
+            ListItem(headlineContent={Text(b?.title ?: "书籍已移出书架")},supportingContent={Text("${if(finished) "下载完成" else when(info.state.name) {"ENQUEUED","BLOCKED" -> if(info.runAttemptCount>0) "等待重试" else if(spec?.wifi!=false) "等待 Wi-Fi 或系统调度" else "等待网络或系统调度";"RUNNING" -> "正在下载";"FAILED" -> "下载失败";else -> if(spec?.paused==true) "已暂停" else "已取消"}} · $done / $total\n${if(spec?.wifi!=false) "仅 Wi-Fi" else "允许移动网络"}\n${info.outputData.getString("error").orEmpty()}")},trailingContent={
+                if(active) TextButton(onClick={model.run {ChapterWorker.pause(context,id ?: return@run)}}) {Text("暂停")}
+                else if(b!=null && !finished && (spec!=null || batch.any {work -> work.tags.any {it.startsWith("generation:") && it.substringAfter(':').toLongOrNull()!=null}})) TextButton(onClick={model.run {
+                    if(spec!=null) ChapterWorker.resume(context,b) else {
+                        val range=info.tags.firstOrNull {it.startsWith("range:")}?.split(':')
+                        ChapterWorker.enqueue(context,b,(range?.getOrNull(1)?.toIntOrNull() ?: b.chapter).coerceAtMost(b.chapters.lastIndex),
+                            (range?.getOrNull(2)?.toIntOrNull() ?: b.chapters.lastIndex).coerceAtMost(b.chapters.lastIndex),info.constraints.requiredNetworkType==androidx.work.NetworkType.UNMETERED)
+                    }
+                }}) {Text("继续")}
             })
         } }
     }
@@ -157,6 +167,9 @@ import java.io.File
     var remote by remember {mutableStateOf<List<String>>(emptyList())}
     val backupWork by WorkManager.getInstance(model.app).getWorkInfosForUniqueWorkFlow("daily-backup").collectAsState(emptyList())
     val preferences by model.library.preferences.collectAsState(org.json.JSONObject())
+    var backupStatus by remember {mutableStateOf("")}
+    var backupJob by remember {mutableStateOf<kotlinx.coroutines.Job?>(null)}
+    val scope=rememberCoroutineScope()
     Column(Modifier.verticalScroll(rememberScrollState())) {
         PageHeader("WebDAV","备份到你自己的空间，不进行自动合并。",onBack)
         Column(Modifier.padding(horizontal=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -170,10 +183,22 @@ import java.io.File
                 if(enabled && dav.load()==null) model.message.value="请先保存 WebDAV 配置" else AutomaticBackup.schedule(model.app,enabled)
             }
             Text("自动备份受系统调度影响；成功校验后，仅保留本设备最近 10 份快照。",color=Muted,style=MaterialTheme.typography.bodySmall)
+            Toggle("备份包含已下载正文",preferences.optString("backupOffline","true")!="false") {value -> model.run {model.library.preference("backupOffline",value.toString())}}
             if(preferences.optLong("lastAutomaticBackup")>0) Text("最近成功："+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(preferences.optLong("lastAutomaticBackup"))),style=MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick={model.run {val file=Backup(model.library).create();try {val name=dav.upload(file);model.message.value="已上传并校验：$name"} finally {file.delete()}}}) {Text("立即备份到 WebDAV")}
+            if(preferences.optLong("lastBackupAttempt")>0) Text("最近尝试："+java.text.DateFormat.getDateTimeInstance().format(java.util.Date(preferences.optLong("lastBackupAttempt"))),style=MaterialTheme.typography.bodySmall)
+            if(preferences.optString("backupError").isNotBlank()) Text("最近失败："+preferences.optString("backupError"),color=MaterialTheme.colorScheme.error)
+            if(backupWork.any {it.runAttemptCount>0 && !it.state.isFinished}) Text("自动备份等待重试",color=Muted)
+            if(backupStatus.isNotBlank()) Text(backupStatus,style=MaterialTheme.typography.bodySmall)
+            OutlinedButton(enabled=backupJob?.isActive!=true,onClick={backupJob=model.run {
+                val report: (String)->Unit={status -> scope.launch {backupStatus=status}}
+                try {val file=Backup(model.library).create(includeOffline=preferences.optString("backupOffline","true")!="false",progress=report)
+                    try {val name=dav.upload(file,report);model.library.backupResult();withContext(Dispatchers.Main) {backupStatus="已上传并校验：$name"}} finally {file.delete()}}
+                catch(e: kotlinx.coroutines.CancellationException) {withContext(kotlinx.coroutines.NonCancellable+Dispatchers.Main) {backupStatus="已取消"};throw e}
+                catch(e: Exception) {model.library.backupResult(e.message ?: "备份失败");throw e}
+            }}) {Text("立即备份到 WebDAV")}
+            if(backupJob?.isActive==true) TextButton(onClick={backupJob?.cancel()}) {Text("取消备份")}
             OutlinedButton(onClick={model.run {val names=dav.list();withContext(Dispatchers.Main) {remote=names};if(names.isEmpty()) model.message.value="目录中没有万卷备份"}}) {Text("查看远端备份")}
-            remote.forEach { name -> TextButton(onClick={model.run {val f=dav.download(name);val preview=Backup(model.library).inspect(f);withContext(Dispatchers.Main) {onRestore(f,preview)}}}) {Text(name)} }
+            remote.forEach { name -> TextButton(onClick={model.run {val f=dav.download(name);try {val preview=Backup(model.library).inspect(f);withContext(Dispatchers.Main) {onRestore(f,preview)}} catch(e: Throwable) {f.delete();throw e}}}) {Text(name)} }
         }
     }
 }

@@ -57,6 +57,10 @@ val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
         var release by remember { mutableStateOf<Release?>(null) }
         var downloaded by remember { mutableStateOf(false) }
         var restoreBook by remember { mutableStateOf<Book?>(null) }
+        var backupOptions by remember {mutableStateOf(false)}
+        var backupOffline by remember {mutableStateOf(true)}
+        var transferStatus by remember {mutableStateOf("")}
+        var transferJob by remember {mutableStateOf<Job?>(null)}
         val scope=rememberCoroutineScope()
         val app=model.app
         val library=model.library
@@ -64,11 +68,21 @@ val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
         fun name(uri: Uri): String = activity.contentResolver.query(uri,null,null,null,null)?.use { c -> if(c.moveToFirst()) c.getString(c.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else "book.txt" } ?: "book.txt"
         val importBook=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null) model.run("书籍已加入书架") { BookImporter(library).import(uri,name(uri),encoding) } }
         val importSource=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null) model.run { val text=activity.contentResolver.openInputStream(uri)!!.use { it.readBytesLimited(8*1024*1024).toString(Charsets.UTF_8) }; val data=app.engine.inspect(text); withContext(Dispatchers.Main) { imports=data } } }
-        val exportBackup=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> if(uri!=null) model.run("备份已导出") { val f=Backup(library).create(); try { activity.contentResolver.openOutputStream(uri)!!.use { out -> f.inputStream().use { it.copyTo(out) } } } finally { f.delete() } } }
+        val exportBackup=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri -> if(uri!=null) {
+            transferStatus="正在创建备份"
+            transferJob=model.run {
+                try {val f=Backup(library).create(includeOffline=backupOffline,progress={status -> scope.launch {transferStatus=status}})
+                    try {activity.contentResolver.openOutputStream(uri)!!.use {out -> f.inputStream().use {it.copyChecked(out,Backup.MAX_TOTAL)}};withContext(Dispatchers.Main) {transferStatus=""};model.message.value="备份已导出"}
+                    finally {f.delete()}}
+                catch(e: Throwable) {withContext(NonCancellable+Dispatchers.Main) {transferStatus=""};runCatching {android.provider.DocumentsContract.deleteDocument(activity.contentResolver,uri)};throw e}
+            }
+        } }
         val exportSources=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> if(uri!=null) model.run("书源已导出") { activity.contentResolver.openOutputStream(uri)!!.use { it.write(JSONArray(model.sources.value.map { s -> s.json }).toString(2).toByteArray()) } } }
         val importBackup=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if(uri!=null) model.run {
-            val f=File(activity.cacheDir,"restore-input.zip"); activity.contentResolver.openInputStream(uri)!!.use { f.writeBytes(it.readBytesLimited(512*1024*1024)) }
-            val preview=Backup(library).inspect(f); withContext(Dispatchers.Main) { restore=f to preview }
+            val f=File(activity.cacheDir,"restore-input-${uid()}.zip")
+            try {activity.contentResolver.openInputStream(uri)!!.use {input -> f.outputStream().use {input.copyChecked(it,Backup.MAX_TOTAL)}}
+                val preview=Backup(library).inspect(f);withContext(Dispatchers.Main) {restore=f to preview}}
+            catch(e: Throwable) {f.delete();throw e}
         } }
         LaunchedEffect(message) { message?.let { model.message.value=null; snack.showSnackbar(it) } }
         BackHandler(enabled=page.isNotEmpty() && !reading) { page="" }
@@ -83,14 +97,15 @@ val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
                         val data=app.engine.inspect(text); withContext(Dispatchers.Main) { imports=data }
                     } } },onExport={exportSources.launch("万卷书源.json")})
                     page=="downloads" -> DownloadsScreen(model) { page="" }
+                    page=="storage" -> StorageScreen(model) {page=""}
                     page=="webdav" -> WebDavScreen(model,onBack={page=""},onRestore={ f,preview -> restore=f to preview })
                     tab==0 -> ShelfScreen(model,onBrowse={tab=1},onImport={importBook.launch(arrayOf("text/plain","application/epub+zip","application/octet-stream"))},onSources={page="sources"},onGroup={ book -> prompt=Prompt("书架分组","输入分组名称",book.group) { group -> model.run { library.updateBook(book.id) { it.copy(group=group.ifBlank { "未分组" }) } } } })
                     tab==1 -> SearchScreen(model,onSources={page="sources"})
                     else -> SettingsScreen(model,darkMode,{value -> model.run {library.preference("theme",value.toString())}},encoding,{encoding=it},
-                        onSources={page="sources"},onDownloads={page="downloads"},onBackup={exportBackup.launch("万卷备份-${System.currentTimeMillis()}.zip")},onRestore={importBackup.launch(arrayOf("application/zip","application/octet-stream"))},onDav={page="webdav"},onUpdate={ model.run {
+                        onSources={page="sources"},onDownloads={page="downloads"},onBackup={backupOffline=preferences.optString("backupOffline","true")!="false";backupOptions=true},onRestore={importBackup.launch(arrayOf("application/zip","application/octet-stream"))},onDav={page="webdav"},onUpdate={ model.run {
                             val r=Updater(activity).check()
                             if(r==null) model.message.value="已是最新版本 ${BuildConfig.VERSION_NAME}" else withContext(Dispatchers.Main) { downloaded=false; release=r }
-                        } },onReaderSettings={page="readerSettings"})
+                        } },onReaderSettings={page="readerSettings"},onStorage={page="storage"})
                 }
                 if(page=="readerSettings" && !reading) Surface(Modifier.fillMaxSize()) { ProfileSettings(model,model.profile.collectAsState().value,false,{page=""},activity) }
                 if(busy) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
@@ -105,7 +120,16 @@ val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
                 Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(replace,{replace=it}); Text("更新同地址的已有书源") }
             } },confirmButton={TextButton(onClick={ imports=null; model.run("书源已导入") { candidates.forEach { c -> val existing=library.source(c.source.id); if(existing==null || replace) library.save(c.source.copy(http=existing?.http ?: false)) } } }) { Text("确认导入") }},dismissButton={TextButton(onClick={imports=null}) { Text("取消") }})
         }
-        restore?.let { (file,preview) -> AlertDialog(onDismissRequest={restore=null},title={Text("恢复备份")},text={Text(preview)},confirmButton={TextButton(onClick={restore=null; model.run("备份已恢复") { Backup(library).restore(file) }}) {Text("恢复")}},dismissButton={TextButton(onClick={restore=null}) {Text("取消")}}) }
+        if(backupOptions) AlertDialog(onDismissRequest={backupOptions=false},title={Text("导出备份")},text={Column {
+            Text("包含本地书籍、书源、进度、笔记、阅读设置与预设。不含 WebDAV 密码和下载任务。")
+            Toggle("包含已下载正文",backupOffline) {backupOffline=it}
+            Text(if(backupOffline) "恢复后已下载章节可以断网阅读。" else "在线书籍恢复后需联网获取正文。",color=Muted)
+        }},confirmButton={TextButton(onClick={backupOptions=false;model.run {library.preference("backupOffline",backupOffline.toString())};exportBackup.launch("万卷备份-${System.currentTimeMillis()}.zip")}) {Text("选择保存位置")}},dismissButton={TextButton(onClick={backupOptions=false}) {Text("取消")}})
+        restore?.let { (file,preview) -> AlertDialog(onDismissRequest={file.delete();restore=null},title={Text("恢复备份")},text={Text(preview)},confirmButton={TextButton(onClick={restore=null;transferStatus="正在校验备份";transferJob=model.run {
+            try {Backup(library).restore(file) {status -> scope.launch {transferStatus=status}};model.message.value="备份已恢复"}
+            finally {file.delete();withContext(NonCancellable+Dispatchers.Main) {transferStatus=""}}
+        }}) {Text("恢复")}},dismissButton={TextButton(onClick={file.delete();restore=null}) {Text("取消")}}) }
+        if(transferStatus.isNotBlank()) AlertDialog(onDismissRequest={},title={Text("备份与恢复")},text={Text(transferStatus)},confirmButton={TextButton(enabled=!transferStatus.startsWith("正在提交恢复"),onClick={transferJob?.cancel()}) {Text("取消操作")}})
         release?.let { r -> AlertDialog(onDismissRequest={release=null},title={Text("发现新版本 ${r.version}")},text={Text(r.notes.ifBlank { "更新将保留书架、阅读进度和设置。" } + if(downloaded) "\n\n已验证安装包。授权安装后返回，再点击安装。" else "")},confirmButton={TextButton(onClick={
             if(downloaded) runCatching { Updater(activity).install() }.onFailure { model.message.value=it.message }
             else model.run { Updater(activity).download(r); withContext(Dispatchers.Main) { downloaded=true } }
@@ -179,8 +203,8 @@ data class Prompt(val title: String,val hint: String,val initial: String="",val 
         ActionRow("分组",Icons.Outlined.Folder) {selected=null;onGroup(b)}
         ActionRow(if(b.pinned) "取消置顶" else "置顶",Icons.Outlined.PushPin) {selected=null;model.run {model.library.updateBook(b.id) {it.copy(pinned=!it.pinned)}}}
         ActionRow(if(b.finished) "标为未读完" else "标为已读完",Icons.Outlined.Check) {selected=null;model.run {model.library.updateBook(b.id) {it.copy(finished=!it.finished)}}}
-        if(b.sourceId.isNotBlank()) ActionRow("检查目录更新",Icons.Outlined.Refresh) { selected=null; model.run("目录已更新") { val source=model.library.source(b.sourceId) ?: error("书源已删除"); val updated=model.app.engine.catalog(b,source); model.library.updateBook(b.id) { old -> updated.copy(chapter=old.chapter,offset=old.offset,anchor=old.anchor) } } }
-        ActionRow("移出书架（保留本地文件）",Icons.Outlined.DeleteOutline) {selected=null;model.run {model.library.removeBook(b.id)}}
+        if(b.sourceId.isNotBlank()) ActionRow("检查目录更新",Icons.Outlined.Refresh) {selected=null;model.refreshCatalog(b)}
+        ActionRow("移出书架（保留本地文件）",Icons.Outlined.DeleteOutline) {selected=null;model.removeBook(b)}
     } } }
 }
 @Composable fun BookCover(b: Book) {

@@ -3,6 +3,7 @@ package io.github.godbook.wanjuan.data
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
 import java.io.File
@@ -20,9 +21,9 @@ class BookImporter(private val library: Library) {
             importFile(temporary,displayName,encoding)
         } finally { temporary.delete() }
     }
-    suspend fun importFile(file: File, name: String, encoding: String = "自动"): Book = withContext(Dispatchers.IO) {
+    suspend fun importFile(file: File, name: String, encoding: String = "自动"): Book = withContext(Dispatchers.IO) {library.fileOperations.withLock {
         val hash = file.inputStream().use { stream -> val md = java.security.MessageDigest.getInstance("SHA-256"); val buf = ByteArray(8192); while(true) { val n = stream.read(buf); if(n < 0) break; md.update(buf,0,n) }; md.digest().joinToString("") { "%02x".format(it) } }
-        library.dao.list("book").map { Book.decode(it.payload) }.find { it.localHash == hash }?.let { return@withContext it }
+        library.dao.list("book").map { Book.decode(it.payload) }.find { it.localHash == hash }?.let { return@withContext library.book(it.id)!! }
         val id = uid()
         var book = Book(id=id,title=name.substringBeforeLast('.'),localHash=hash)
         val chapters: List<Chapter>
@@ -130,7 +131,7 @@ class BookImporter(private val library: Library) {
         val original = library.file("books/$id/original.${if(name.endsWith(".epub",true)) "epub" else "txt"}")
         original.parentFile?.mkdirs(); file.copyTo(original,true)
         book.copy(chapters=chapters).also { library.save(it) }
-    }
+    } }
     companion object {
         fun splitText(text: String): List<Pair<String,String>> {
             val heading = Regex("(?m)^[ \\t　]*(第[零〇一二三四五六七八九十百千万两0-9]+[章节卷回部篇][^\\n]{0,45}|(?:序章|楔子|前言|后记|尾声)[^\\n]{0,30})[ \\t]*$")

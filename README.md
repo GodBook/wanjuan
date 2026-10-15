@@ -41,6 +41,8 @@ Windows 可以用 `scripts/test-device.ps1 -Serial <adb序列号>` 安装调试�
 
 ## 文档
 
+- [后续更新与优化建议](docs/UPDATE_PLAN.md)
+- [当前更新执行状态](docs/EXECUTION.md)
 - [软件设计与实现边界](docs/DESIGN.md)
 - [书源规则兼容清单](docs/SOURCE_COMPATIBILITY.md)
 - [发布与在线更新](docs/RELEASING.md)

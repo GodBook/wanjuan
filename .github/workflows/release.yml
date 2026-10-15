@@ -54,7 +54,9 @@ jobs:
           apk = output / f'wanjuan-{version}.apk'
           shutil.copyfile('app/build/outputs/apk/release/app-release.apk', apk)
           digest = hashlib.sha256(apk.read_bytes()).hexdigest()
-          manifest = dict(packageName='io.github.godbook.wanjuan', versionName=version, versionCode=int(os.environ['RELEASE_CODE']), apkUrl=f'https://github.com/GodBook/wanjuan/releases/download/v{version}/{apk.name}', sha256=digest, notes=f'万卷 {version}')
+          changelog = pathlib.Path(f'docs/releases/{version}.md')
+          summary = next((line.strip() for line in changelog.read_text(encoding='utf-8').splitlines() if line.strip() and not line.startswith('#')), '') if changelog.exists() else ''
+          manifest = dict(packageName='io.github.godbook.wanjuan', versionName=version, versionCode=int(os.environ['RELEASE_CODE']), apkUrl=f'https://github.com/GodBook/wanjuan/releases/download/v{version}/{apk.name}', sha256=digest, notes=f'万卷 {version}\n{summary}')
           (output / 'update.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
           (output / 'SHA256SUMS.txt').write_text(f'{digest}  {apk.name}\n', encoding='utf-8')
       - name: Create draft release for device verification

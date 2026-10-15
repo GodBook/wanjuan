@@ -23,6 +23,7 @@ import io.github.godbook.wanjuan.*
 import io.github.godbook.wanjuan.data.*
 import io.github.godbook.wanjuan.reader.ReadingView
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 private data class ReaderText(val raw: String,val from: String,val to: String,val indent: Boolean)
@@ -30,6 +31,7 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
 @Composable fun ReaderScreen(model: AppModel,activity: MainActivity,onSources: ()->Unit) {
     val book by model.reader.collectAsState()
     val raw by model.body.collectAsState()
+    val load by model.readerLoad.collectAsState()
     val generation by model.readerGeneration.collectAsState()
     val global by model.profile.collectAsState()
     val marks by model.marks.collectAsState()
@@ -43,6 +45,7 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
     var pageCount by remember {mutableIntStateOf(1)}
     var view by remember {mutableStateOf<ReadingView?>(null)}
     var candidate by remember {mutableStateOf<Book?>(null)}
+    var reviewMark by remember {mutableStateOf<Mark?>(null)}
     var candidates by remember {mutableStateOf<List<Book>>(emptyList())}
     var wifi by remember {mutableStateOf(true)}
     var downloadEnd by remember {mutableIntStateOf(0)}
@@ -74,7 +77,10 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
         Row(Modifier.fillMaxWidth().padding(horizontal=24.dp,vertical=8.dp)) {Text(b.chapters.getOrNull(b.chapter)?.title ?: b.title,Modifier.weight(1f),maxLines=1,color=fg.copy(alpha=.5f),style=MaterialTheme.typography.labelSmall)}
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if(transformed.isBlank()) Column(Modifier.align(Alignment.Center),horizontalAlignment=Alignment.CenterHorizontally) {
-                Text("正在准备正文",color=fg);TextButton(onClick={model.open(b)}) {Text("重试")};TextButton(onClick={menu=true;sheet="toc"}) {Text("打开目录")};TextButton(onClick={model.closeReader()}) {Text("返回书架")}
+                Text(when(val status=load) {is ReaderLoad.Failed -> "读取失败";ReaderLoad.Empty -> "本章没有正文";else -> "正在准备正文"},color=fg)
+                if(load is ReaderLoad.Failed) Text((load as ReaderLoad.Failed).reason,Modifier.padding(24.dp),color=fg.copy(alpha=.7f))
+                if(load is ReaderLoad.Failed || load==ReaderLoad.Empty) TextButton(onClick={model.open(b)}) {Text("重试")}
+                TextButton(onClick={menu=true;sheet="toc"}) {Text("打开目录")};TextButton(onClick={model.closeReader()}) {Text("返回书架")}
             } else AndroidView(factory={ctx -> ReadingView(ctx).also {v ->view=v}},modifier=Modifier.fillMaxSize(),update={v ->
                 v.onMenu={menu=!menu};v.onBoundary={model.turnChapter(it)};v.onLongPress={sheet="select"}
                 v.onPosition={offset,quote,p,count -> page=p;pageCount=count;model.position(offset,quote)}
@@ -109,8 +115,8 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
         Column(Modifier.fillMaxHeight(.85f)) {
             Text("目录 · ${b.chapters.size} 章",Modifier.padding(24.dp),style=MaterialTheme.typography.titleLarge)
             OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(horizontal=24.dp),placeholder={Text("搜索章节")},singleLine=true)
-            LazyColumn(state=state,contentPadding=PaddingValues(16.dp)) {itemsIndexed(b.chapters.filter {query.isBlank() || it.title.contains(query)}) { _,chapter ->
-                val index=b.chapters.indexOf(chapter)
+            val filtered=remember(b.chapters,query) {b.chapters.withIndex().filter {query.isBlank() || it.value.title.contains(query)}}
+            LazyColumn(state=state,contentPadding=PaddingValues(16.dp)) {items(filtered,key={it.value.id}) { (index,chapter) ->
                 ListItem(headlineContent={Text(chapter.title,color=if(index==b.chapter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)},supportingContent={if(index==b.chapter) Text("正在阅读")},modifier=Modifier.clickable {model.flush();model.open(b,index,0,"");sheet=""})
             } }
         }
@@ -133,14 +139,30 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
         item {Text("书签与笔记",style=MaterialTheme.typography.titleLarge)}
         val bookMarks=marks.filter {it.bookId==b.id}
         if(bookMarks.isEmpty()) item {Text("还没有书签。阅读菜单右上角可以添加。",Modifier.padding(vertical=20.dp),color=Muted)}
-        items(bookMarks,key={it.id}) {mark -> ListItem(headlineContent={Text(b.chapters.getOrNull(mark.chapter)?.title ?: "章节已变化")},supportingContent={Text(mark.note.ifBlank {mark.quote})},modifier=Modifier.clickable {model.open(b,mark.chapter,mark.offset,mark.quote);sheet=""},trailingContent={IconButton(onClick={model.run {model.library.dao.delete("mark",mark.id)}}) {Icon(Icons.Outlined.DeleteOutline,"删除书签")}})}
+        items(bookMarks,key={it.id}) {mark ->
+            val index=mark.indexIn(b)
+            ListItem(headlineContent={Text(if(index==null) "${mark.chapterTitle.ifBlank {"原第 ${mark.chapter+1} 章"}} · 待定位" else b.chapters[index].title)},supportingContent={Text(mark.note.ifBlank {mark.quote})},
+                modifier=Modifier.clickable {if(index==null) {reviewMark=mark;sheet="reviewMark"} else {model.open(b,index,mark.offset,mark.quote);sheet=""}},
+                trailingContent={IconButton(onClick={model.run {model.library.delete("mark",mark.id)}}) {Icon(Icons.Outlined.DeleteOutline,"删除书签")}})
+        }
     } }
+    if(sheet=="reviewMark") reviewMark?.let {mark -> ModalBottomSheet(onDismissRequest={sheet=""}) {
+        var query by remember(mark.id) {mutableStateOf("")}
+        Column(Modifier.fillMaxHeight(.85f).padding(24.dp)) {
+            Text("为书签确认章节",style=MaterialTheme.typography.titleLarge)
+            Text("原位置：${mark.chapterTitle.ifBlank {"第 ${mark.chapter+1} 章"}}\n来源或目录已变化，请选择对应章节。摘录匹配失败时从章首打开。",color=Muted)
+            Text(mark.note.ifBlank {mark.quote},Modifier.padding(vertical=12.dp),maxLines=3)
+            OutlinedTextField(query,{query=it},Modifier.fillMaxWidth(),label={Text("搜索当前目录")})
+            val filtered=remember(b.chapters,query) {b.chapters.withIndex().filter {query.isBlank() || it.value.title.contains(query)}}
+            LazyColumn {items(filtered,key={it.value.id}) {(index,chapter) -> ListItem(headlineContent={Text(chapter.title)},modifier=Modifier.clickable {model.relocateMark(mark,index);sheet=""})}}
+        }
+    }}
     if(sheet=="download") ModalBottomSheet(onDismissRequest={sheet=""}) {Column(Modifier.padding(24.dp)) {
         Text("离线缓存",style=MaterialTheme.typography.titleLarge)
         Text("从第 ${b.chapter+1} 章到第 ${downloadEnd+1} 章",Modifier.padding(top=16.dp))
         if(b.chapters.lastIndex>b.chapter) Slider(downloadEnd.toFloat(),{downloadEnd=it.toInt()},valueRange=b.chapter.toFloat()..b.chapters.lastIndex.toFloat())
         Row(verticalAlignment=Alignment.CenterVertically) {Checkbox(wifi,{wifi=it});Text("仅 Wi-Fi 下载")}
-        Button(onClick={ChapterWorker.enqueue(activity,b,b.chapter,downloadEnd,wifi);sheet="";model.message.value="已加入下载队列"}) {Text("开始缓存")}
+        Button(onClick={sheet="";model.run("已加入下载队列") {ChapterWorker.enqueue(activity,b,b.chapter,downloadEnd,wifi)}}) {Text("开始缓存")}
     } }
     if(sheet=="sources") ModalBottomSheet(onDismissRequest={sheet=""}) {LazyColumn(contentPadding=PaddingValues(24.dp)) {
         item {Text("选择其他来源",style=MaterialTheme.typography.titleLarge);Text("选择来源后，确认对应章节。",color=Muted)}
@@ -164,17 +186,17 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
     var perBook by remember {mutableStateOf(initialPerBook)}
     var prompt by remember {mutableStateOf<Prompt?>(null)}
     fun change(value: Profile) {p=value;model.saveProfile(value,perBook)}
-    val importFont=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) model.run {
+    val importFont=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) model.run {model.library.fileOperations.withLock {
         val file=model.library.file("assets/font-${uid()}.ttf");file.parentFile?.mkdirs();activity.contentResolver.openInputStream(uri)!!.use {file.writeBytes(it.readBytesLimited(20*1024*1024))}
         try {android.graphics.Typeface.createFromFile(file)} catch(e: Exception) {file.delete();error("无法读取此字体")}
-        withContext(Dispatchers.Main) {change(p.copy(font=file.path))}
-    } }
-    val importBackground=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) model.run {
+        withContext(Dispatchers.Main) {p=p.copy(font=file.path);model.saveProfile(p,perBook)}.join()
+    } } }
+    val importBackground=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri -> if(uri!=null) model.run {model.library.fileOperations.withLock {
         val file=model.library.file("assets/background-${uid()}.img");file.parentFile?.mkdirs();activity.contentResolver.openInputStream(uri)!!.use {file.writeBytes(it.readBytesLimited(10*1024*1024))}
         val options=android.graphics.BitmapFactory.Options().apply {inJustDecodeBounds=true};android.graphics.BitmapFactory.decodeFile(file.path,options)
         require(options.outWidth>0 && options.outWidth.toLong()*options.outHeight<=40_000_000) {"图片尺寸过大或格式不支持"}
-        withContext(Dispatchers.Main) {change(p.copy(background=file.path))}
-    } }
+        withContext(Dispatchers.Main) {p=p.copy(background=file.path);model.saveProfile(p,perBook)}.join()
+    } } }
     val presets by model.library.dao.observe("preset").collectAsState(emptyList())
     Column {
         Row(Modifier.fillMaxWidth().padding(horizontal=24.dp),verticalAlignment=Alignment.CenterVertically) {Text("阅读设置",Modifier.weight(1f),style=MaterialTheme.typography.titleLarge);TextButton(onClick=onClose) {Text("完成")}}
@@ -205,7 +227,7 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
             OutlinedTextField(to,{to=it},Modifier.fillMaxWidth().padding(top=8.dp),label={Text("替换为（可留空）")})
             TextButton(onClick={change(p.copy(replaceFrom=from,replaceTo=to))}) {Text("应用替换")}
             HorizontalDivider(Modifier.padding(vertical=12.dp))
-            Row {TextButton(onClick={prompt=Prompt("保存阅读预设","预设名称") {name -> if(name.isNotBlank()) model.run("预设已保存") {model.library.dao.put(Record("preset",name,p.json().toString()))}}}) {Text("保存为预设")};TextButton(onClick={change(Profile())}) {Text("恢复默认")}}
+            Row {TextButton(onClick={prompt=Prompt("保存阅读预设","预设名称") {name -> if(name.isNotBlank()) model.run("预设已保存") {model.library.put(Record("preset",name,p.json().toString()))}}}) {Text("保存为预设")};TextButton(onClick={change(Profile())}) {Text("恢复默认")}}
             presets.forEach {preset -> TextButton(onClick={change(Profile.from(preset.payload))}) {Text("应用：${preset.id}")}}
         }
     }

@@ -7,8 +7,13 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resumeWithException
 import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
+import java.io.File
+import java.io.InputStream
+import io.github.godbook.wanjuan.data.copyChecked
 
 class Network(private val http: Boolean = false, private val privateHost: Boolean = false) {
     private fun validate(url: HttpUrl) {
@@ -27,14 +32,15 @@ class Network(private val http: Boolean = false, private val privateHost: Boolea
             }
         } }).build()
     }
-    suspend fun bytes(url: String, headers: Map<String,String> = emptyMap(), method: String = "GET", body: RequestBody? = null, limit: Long = 8L*1024*1024): ByteArray = withContext(Dispatchers.IO) {
+    private suspend fun <T> stream(url: String, headers: Map<String,String>, method: String, body: RequestBody?, transfer: Boolean = false, consume: suspend (InputStream)->T): T = withContext(Dispatchers.IO) {
         var current = url.toHttpUrl()
         var currentHeaders = headers
         repeat(6) {
             validate(current)
             val req = Request.Builder().url(current).method(method,body).apply { currentHeaders.forEach { (k,v) -> header(k,v) } }.build()
             val response = suspendCancellableCoroutine<Response> { cont ->
-                val call=client.newCall(req)
+                val activeClient=if(transfer) client.newBuilder().callTimeout(10,TimeUnit.MINUTES).build() else client
+                val call=activeClient.newCall(req)
                 cont.invokeOnCancellation { call.cancel() }
                 call.enqueue(object: Callback {
                     override fun onFailure(call: Call,e: java.io.IOException) { if(cont.isActive) cont.resumeWithException(e) }
@@ -50,14 +56,27 @@ class Network(private val http: Boolean = false, private val privateHost: Boolea
                 } else {
                     require(response.isSuccessful) { "HTTP ${response.code}：${if(response.code == 429) "请求过于频繁，请稍后重试" else "服务器请求失败"}" }
                     val stream = response.body?.byteStream() ?: error("响应为空")
-                    val output = java.io.ByteArrayOutputStream()
-                    val buffer = ByteArray(8192)
-                    while (true) { val n = stream.read(buffer); if (n < 0) break; require(output.size().toLong()+n <= limit) { "内容超过大小限制" }; output.write(buffer,0,n) }
-                    return@withContext output.toByteArray()
+                    return@withContext consume(stream)
                 }
             }
         }
         error("重定向次数过多")
+    }
+    suspend fun bytes(url: String, headers: Map<String,String> = emptyMap(), method: String = "GET", body: RequestBody? = null, limit: Long = 8L*1024*1024): ByteArray =
+        stream(url,headers,method,body) {input -> java.io.ByteArrayOutputStream().also {input.copyChecked(it,limit)}.toByteArray()}
+
+    suspend fun download(url: String, file: File, headers: Map<String,String> = emptyMap(), limit: Long = 512L*1024*1024, progress: (Long)->Unit = {}): String =
+        stream(url,headers,"GET",null,true) {input ->
+            val temp=File(file.parentFile,file.name+".partial")
+            try {
+                val hash=temp.outputStream().buffered().use {input.copyChecked(it,limit,progress).second}
+                java.nio.file.Files.move(temp.toPath(),file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                hash
+            } finally {temp.delete()}
+        }
+    suspend fun upload(url: String,file: File,headers: Map<String,String>): Unit = stream(url,headers,"PUT",file.asRequestBody("application/zip".toMediaType()),true) {input ->
+        input.copyChecked(object: java.io.OutputStream() {override fun write(b: Int) {};override fun write(b: ByteArray,off: Int,len: Int) {}},8L*1024*1024)
+        Unit
     }
     suspend fun text(url: String, headers: Map<String,String> = emptyMap(), method: String = "GET", body: RequestBody? = null): String {
         val b = bytes(url,headers,method,body)

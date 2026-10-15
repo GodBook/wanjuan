@@ -17,8 +17,8 @@ android {
         applicationId = "io.github.godbook.wanjuan"
         minSdk = 29
         targetSdk = 35
-        versionCode = providers.gradleProperty("appVersionCode").orNull?.toInt() ?: 102
-        versionName = providers.gradleProperty("appVersionName").orNull ?: "0.1.2"
+        versionCode = providers.gradleProperty("appVersionCode").orNull?.toInt() ?: 103
+        versionName = providers.gradleProperty("appVersionName").orNull ?: "0.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "UPDATE_REPO", "\"GodBook/wanjuan\"")
     }

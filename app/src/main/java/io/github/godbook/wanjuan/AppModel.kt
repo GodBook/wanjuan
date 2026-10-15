@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+sealed interface ReaderLoad {
+    data object Loading: ReaderLoad
+    data object Ready: ReaderLoad
+    data object Empty: ReaderLoad
+    data class Failed(val reason: String): ReaderLoad
+}
+
 class AppModel(application: Application): AndroidViewModel(application) {
     val app=application as WanJuanApp
     val library=app.library
@@ -19,8 +26,10 @@ class AppModel(application: Application): AndroidViewModel(application) {
     val profile=library.profile.stateIn(viewModelScope,SharingStarted.Eagerly,Profile())
     val reader=MutableStateFlow<Book?>(null)
     val body=MutableStateFlow("")
+    val readerLoad=MutableStateFlow<ReaderLoad>(ReaderLoad.Loading)
     val readerGeneration=MutableStateFlow(0)
     val busy=MutableStateFlow(false)
+    private var runningOperations=0
     val message=MutableStateFlow<String?>(null)
     val results=MutableStateFlow<List<Book>>(emptyList())
     val searchDone=MutableStateFlow(0)
@@ -29,30 +38,36 @@ class AppModel(application: Application): AndroidViewModel(application) {
     var searchJob: Job?=null
     private var readJob: Job?=null
     private var saveJob: Job?=null
+    private var searchGeneration=0
     private val contentLock=Mutex()
     init { viewModelScope.launch(Dispatchers.IO) {
         try { BuiltinSources.install(library) } catch(e: Exception) { message.value="内置书源初始化失败，可在书源管理中重试" }
     } }
     fun run(label: String = "", block: suspend ()->Unit) = viewModelScope.launch {
-        busy.value=true
+        runningOperations+=1;busy.value=true
         try { withContext(Dispatchers.IO) { block() }; if(label.isNotBlank()) message.value=label }
         catch(e: CancellationException) { throw e }
         catch(e: Exception) { message.value=e.message ?: "操作失败" }
-        finally { busy.value=false }
+        finally {runningOperations-=1;busy.value=runningOperations>0}
     }
     fun search(query: String, group: String="全部") {
+        val token=++searchGeneration
         searchJob?.cancel(); results.value=emptyList(); searchErrors.value=emptyList(); searchDone.value=0
+        searching.value=query.isNotBlank()
         if(query.isBlank()) return
         searchJob=viewModelScope.launch {
             searching.value=true
             try {
-                library.dao.put(Record("history",query,query))
+                library.rememberSearch(query.trim())
                 app.engine.search(query,sources.value.filter { group=="全部" || it.group==group }).collect { event ->
+                    if(token!=searchGeneration) return@collect
                     results.value=results.value+event.books
                     searchDone.value+=1
                     if(event.error!=null) searchErrors.value=searchErrors.value+"${event.source.name}：${event.error}"
                 }
-            } finally { searching.value=false }
+            } catch(e: CancellationException) {throw e}
+            catch(e: Exception) {if(token==searchGeneration) message.value=e.message ?: "搜索失败"}
+            finally {if(token==searchGeneration) searching.value=false}
         }
     }
     fun addOnline(book: Book, read: Boolean=true) = run {
@@ -63,17 +78,18 @@ class AppModel(application: Application): AndroidViewModel(application) {
         if(read) withContext(Dispatchers.Main) { open(loaded) }
     }
     fun open(book: Book, chapter: Int=book.chapter, offset: Int=book.offset, quote: String=book.anchor) {
-        readerGeneration.value+=1
-        readJob?.cancel(); body.value=""
+        val token=readerGeneration.value+1;readerGeneration.value=token
+        readJob?.cancel();body.value="";readerLoad.value=ReaderLoad.Loading
         val index=chapter.coerceIn(0,book.chapters.lastIndex.coerceAtLeast(0))
         reader.value=book.copy(chapter=index,offset=offset,anchor=quote)
         readJob=viewModelScope.launch {
             try {
                 val text=content(book,index)
-                body.value=text
+                if(token!=readerGeneration.value) return@launch
+                body.value=text;readerLoad.value=if(text.isBlank()) ReaderLoad.Empty else ReaderLoad.Ready
                 for(i in index+1..(index+3).coerceAtMost(book.chapters.lastIndex)) try { content(book,i) } catch(e: CancellationException) { throw e } catch(_: Exception) { /* Optional prefetch must not interrupt reading. */ }
             } catch(e: CancellationException) { throw e }
-            catch(e: Exception) { message.value=e.message ?: "读取失败" }
+            catch(e: Exception) {if(token==readerGeneration.value) readerLoad.value=ReaderLoad.Failed(e.message ?: "读取失败")}
         }
     }
     suspend fun content(book: Book,index: Int): String = withContext(Dispatchers.IO) {
@@ -84,7 +100,7 @@ class AppModel(application: Application): AndroidViewModel(application) {
         contentLock.withLock {
             library.text(path)?.let { return@withLock it }
             val source=library.source(book.sourceId) ?: error("此书的书源已删除，请换源")
-            app.engine.content(c,source).also { library.putText(path,it);library.trimCache() }
+            app.engine.content(c,source).also {library.putChapter(book,c,it);library.trimCache()}
         }
     }
     fun turnChapter(forward: Boolean) {
@@ -98,10 +114,10 @@ class AppModel(application: Application): AndroidViewModel(application) {
         if(b.offset==offset && b.anchor==anchor) return
         reader.value=b.copy(offset=offset,anchor=anchor)
         saveJob?.cancel()
-        saveJob=viewModelScope.launch { delay(250); library.progress(b.id,b.chapter,offset,anchor) }
+        saveJob=viewModelScope.launch { delay(250); library.progress(b.id,b.chapter,offset,anchor,b) }
     }
-    fun flush() { val b=reader.value ?: return; saveJob?.cancel(); viewModelScope.launch { library.progress(b.id,b.chapter,b.offset,b.anchor) } }
-    fun closeReader() { flush(); readJob?.cancel(); reader.value=null; body.value="" }
+    fun flush() { val b=reader.value ?: return; saveJob?.cancel(); viewModelScope.launch { library.progress(b.id,b.chapter,b.offset,b.anchor,b) } }
+    fun closeReader() {flush();readerGeneration.value+=1;readJob?.cancel();reader.value=null;body.value=""}
     fun saveProfile(p: Profile, perBook: Boolean) = run {
         val b=reader.value
         if(perBook && b!=null) {
@@ -114,12 +130,30 @@ class AppModel(application: Application): AndroidViewModel(application) {
     }
     fun bookmark(note: String="") = run("已保存书签") {
         val b=reader.value ?: return@run
-        library.save(Mark(bookId=b.id,chapter=b.chapter,offset=b.offset,quote=b.anchor,note=note))
+        library.save(Mark(bookId=b.id,chapter=b.chapter,offset=b.offset,quote=b.anchor,note=note).withContext(b))
     }
     fun switchSource(current: Book,candidate: Book, chapter: Int) = run {
         require(chapter in candidate.chapters.indices)
-        val switched=candidate.copy(id=current.id,chapter=chapter,offset=current.offset,anchor=current.anchor,group=current.group,pinned=current.pinned,profile=current.profile)
-        library.save(switched)
+        saveJob?.cancelAndJoin()
+        library.progress(current.id,current.chapter,current.offset,current.anchor,current)
+        ChapterWorker.cancel(app,current.id)
+        val switched=library.replaceEdition(current.id,candidate,chapter)
         withContext(Dispatchers.Main) { open(switched) }
+    }
+    fun removeBook(book: Book) = run("已移出书架，本地文件保留") {ChapterWorker.cancel(app,book.id);library.removeBook(book.id)}
+    fun refreshCatalog(book: Book) = run {
+        val source=library.source(book.sourceId) ?: error("书源已删除")
+        val updated=app.engine.catalog(book,source)
+        ChapterWorker.cancel(app,book.id)
+        val result=library.replaceEdition(book.id,updated)
+        val added=result.chapters.count {c -> book.chapters.none {it.id==c.id}}
+        message.value=if(added>0) "目录已更新，新增 $added 章" else "目录已检查，当前没有新增章节"
+    }
+    fun relocateMark(mark: Mark,chapter: Int) = run {
+        val b=library.book(mark.bookId) ?: error("书籍已移出书架")
+        require(chapter in b.chapters.indices)
+        val updated=mark.copy(offset=0).withContext(b,chapter)
+        library.save(updated)
+        withContext(Dispatchers.Main) {open(b,chapter,0,mark.quote)}
     }
 }
