@@ -23,9 +23,9 @@ class ReadingUiTest {
         app.library.saveProfile(Profile())
         val device=UiDevice.getInstance(instrumentation)
         device.wakeUp();device.executeShellCommand("wm dismiss-keyguard")
-        val intent=context.packageManager.getLaunchIntentForPackage(context.packageName)!!.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-        context.startActivity(intent)
-        assertTrue("书架应出现测试书",device.wait(Until.hasObject(By.text(book.title)),10000))
+        // Shell launch avoids Android 10 background activity-start restrictions in instrumentation.
+        device.executeShellCommand("am start -W -f 0x10008000 -n ${context.packageName}/${MainActivity::class.java.name}")
+        assertTrue("书架应出现测试书",device.wait(Until.hasObject(By.text(book.title)),20000))
         device.findObjects(By.text(book.title)).first().click()
         assertTrue("阅读页应显示页码",device.wait(Until.hasObject(By.textContains("页")),10000))
         device.click((device.displayWidth*.88).toInt(),device.displayHeight/2)

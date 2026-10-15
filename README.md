@@ -15,6 +15,14 @@
 
 不内置内容网站或书源。请导入自己有权访问的内容来源。书源兼容是明确的子集，不代表对所有阅读书源完全兼容。参见 [兼容清单](docs/SOURCE_COMPATIBILITY.md)。
 
+## 实机界面
+
+以下为 Android 15 实体手机上的正式版本截图，正文为自编测试小说《山间来信》。
+
+<img src="docs/images/shelf.png" alt="万卷书架" width="270"> <img src="docs/images/reader.png" alt="万卷阅读页" width="270">
+
+0.1.0 已通过 10 项 JVM 单元测试、Android 15 实机与 Android 10 模拟器各 8 项仪器测试，并完成应用内在线覆盖升级及阅读进度保留验证。详细范围与未覆盖项见 [验证记录](docs/TESTING.md)。
+
 ## 开发
 
 环境：JDK 17、Android SDK 35、Gradle Wrapper 8.14.2。
