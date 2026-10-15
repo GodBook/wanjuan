@@ -22,7 +22,7 @@
 
 <img src="docs/images/shelf.png" alt="万卷书架" width="270"> <img src="docs/images/reader.png" alt="万卷阅读页" width="270">
 
-0.1.0 已通过 10 项 JVM 单元测试、Android 15 实机与 Android 10 模拟器各 8 项仪器测试，并完成应用内在线覆盖升级及阅读进度保留验证。详细范围与未覆盖项见 [验证记录](docs/TESTING.md)。
+0.1.1 已通过 14 项 JVM 单元测试、Android 15 实机与 Android 10 模拟器各 10 项仪器测试，包含两个内置书源的真实联网读取、快速翻页、滚动和备份恢复。详细范围与未覆盖项见 [验证记录](docs/TESTING.md)。
 
 ## 开发
 

@@ -7,6 +7,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CoreTest {
+    @Test fun wikiRemovesNavigationButPreservesTextTables() {
+        val html="<div id='mw-content-text'><div class='mw-parser-output'><p><a>回目录</a>　<a>下一回</a></p><p>正文段落。</p><table><tr><td>诗句仍然保留。</td></tr></table><div class='licenseContainer'>站点许可</div></div></div>"
+        val text=io.github.godbook.wanjuan.source.BuiltinSources.wikiText(html,"https://zh.wikisource.org/")
+        assertFalse(text.contains("回目录"));assertFalse(text.contains("站点许可"))
+        assertTrue(text.contains("正文段落"));assertTrue(text.contains("诗句仍然保留"))
+    }
     @Test fun gutenbergSplitsChaptersAndJoinsHardWraps() {
         val input="header\n*** START OF THE PROJECT GUTENBERG EBOOK TEST ***\n第一回 初见\n-----\n第一段硬\n换行。\n\n第二段。\n第二回 再会\n正文结束。\n*** END OF THE PROJECT GUTENBERG EBOOK TEST ***\nlicense"
         val chapters=io.github.godbook.wanjuan.source.BuiltinSources.splitGutenberg(input)

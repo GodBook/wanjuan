@@ -51,10 +51,7 @@ class BuiltinSources(private val context: Context) {
             gutenberg(pgId(chapter.url)).getOrNull(index)?.second ?: error("章节已变化，请刷新目录")
         } else {
             require(chapter.url.startsWith("https://zh.wikisource.org/wiki/"))
-            val doc=Jsoup.parse(network.text(chapter.url,headers),chapter.url)
-            val body=doc.selectFirst("#mw-content-text .mw-parser-output") ?: error("正文暂不可用")
-            body.select(".ws-noexport,.noprint,.mw-editsection,.navbox,.header-container,table,style,script").remove()
-            Rules.htmlText(body.html())
+            wikiText(network.text(chapter.url,headers),chapter.url)
         }
         require(text.length in 80..1_000_000) { "正文不完整，请尝试另一来源" }
         text
@@ -99,6 +96,17 @@ class BuiltinSources(private val context: Context) {
             }
         }
         private fun chapter(source: Source,title: String,url: String)=Chapter(id=sha256((source.id+url).toByteArray()).take(32),title=title,url=url)
+        fun wikiText(html: String,url: String): String {
+            val doc=Jsoup.parse(html,url)
+            val body=doc.selectFirst("#mw-content-text .mw-parser-output") ?: error("正文暂不可用")
+            body.select(".ws-noexport,.noprint,.mw-editsection,.navbox,.header-container,.headertemplate,.licenseContainer,style,script").remove()
+            val navigation=setOf("回目录","回目錄","上一回","下一回","上一章","下一章","上一卷","下一卷")
+            body.select("p").filter { paragraph ->
+                paragraph.ownText().isBlank() && paragraph.children().isNotEmpty() &&
+                    paragraph.children().all {it.tagName()=="a" && it.text() in navigation}
+            }.forEach {it.remove()}
+            return Rules.htmlText(body.html())
+        }
         fun splitGutenberg(raw: String): List<Pair<String,String>> {
             val start=raw.indexOf("*** START OF")
             val end=raw.indexOf("*** END OF")
