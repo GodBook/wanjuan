@@ -30,6 +30,9 @@ class AppModel(application: Application): AndroidViewModel(application) {
     private var readJob: Job?=null
     private var saveJob: Job?=null
     private val contentLock=Mutex()
+    init { viewModelScope.launch(Dispatchers.IO) {
+        try { BuiltinSources.install(library) } catch(e: Exception) { message.value="内置书源初始化失败，可在书源管理中重试" }
+    } }
     fun run(label: String = "", block: suspend ()->Unit) = viewModelScope.launch {
         busy.value=true
         try { withContext(Dispatchers.IO) { block() }; if(label.isNotBlank()) message.value=label }
@@ -68,7 +71,7 @@ class AppModel(application: Application): AndroidViewModel(application) {
             try {
                 val text=content(book,index)
                 body.value=text
-                for(i in index+1..(index+3).coerceAtMost(book.chapters.lastIndex)) runCatching { content(book,i) }
+                for(i in index+1..(index+3).coerceAtMost(book.chapters.lastIndex)) try { content(book,i) } catch(e: CancellationException) { throw e } catch(_: Exception) { /* Optional prefetch must not interrupt reading. */ }
             } catch(e: CancellationException) { throw e }
             catch(e: Exception) { message.value=e.message ?: "读取失败" }
         }
@@ -92,6 +95,7 @@ class AppModel(application: Application): AndroidViewModel(application) {
     }
     fun position(offset: Int,anchor: String) {
         val b=reader.value ?: return
+        if(b.offset==offset && b.anchor==anchor) return
         reader.value=b.copy(offset=offset,anchor=anchor)
         saveJob?.cancel()
         saveJob=viewModelScope.launch { delay(250); library.progress(b.id,b.chapter,offset,anchor) }

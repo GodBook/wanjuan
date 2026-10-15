@@ -2,6 +2,11 @@
 package io.github.godbook.wanjuan.ui
 
 import androidx.compose.foundation.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import io.github.godbook.wanjuan.source.BuiltinSources
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material.icons.Icons
@@ -29,23 +34,31 @@ import java.io.File
     val done by model.searchDone.collectAsState()
     val errors by model.searchErrors.collectAsState()
     val searching by model.searching.collectAsState()
-    val histories by model.library.dao.observe("history").collectAsState(emptyList())
+    val histories by remember(model) { model.library.dao.observe("history") }.collectAsState(emptyList())
+    val keyboard=LocalSoftwareKeyboardController.current
     var selected by remember { mutableStateOf<Book?>(null) }
     var showErrors by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         PageHeader("搜索","在不同书源之间，找到想读的故事。") {IconButton(onClick=onSources) {Icon(Icons.Outlined.Dns,"管理书源")}}
         Row(Modifier.padding(24.dp,12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-            OutlinedTextField(query,{query=it},Modifier.weight(1f),placeholder={Text("书名或作者")},singleLine=true,shape=androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
-            FilledIconButton(onClick={ if(searching) model.searchJob?.cancel() else model.search(query,group) }) {Icon(if(searching) Icons.Outlined.Close else Icons.Outlined.Search,if(searching) "取消搜索" else "开始搜索")}
+            OutlinedTextField(query,{query=it},Modifier.weight(1f),placeholder={Text("书名或作者")},singleLine=true,keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),keyboardActions=KeyboardActions(onSearch={keyboard?.hide();model.search(query,group)}),shape=androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+            FilledIconButton(onClick={ if(searching) model.searchJob?.cancel() else {keyboard?.hide();model.search(query,group)} }) {Icon(if(searching) Icons.Outlined.Close else Icons.Outlined.Search,if(searching) "取消搜索" else "开始搜索")}
         }
         if(sources.none { it.enabled }) EmptyState("先添加你的书源","支持导入阅读 / Legado 的常用 JSON 规则。","管理书源",onSources)
         else {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) { (listOf("全部")+sources.map { it.group }.distinct()).forEach { g -> FilterChip(group==g,{group=g},label={Text(g)}) } }
             if(done>0 || searching) Row(Modifier.padding(24.dp,8.dp)) {Text("已完成 $done / ${sources.count { it.enabled && (group=="全部" || it.group==group) }} · ${results.size} 个结果",style=MaterialTheme.typography.labelMedium,color=Muted); Spacer(Modifier.weight(1f)); if(errors.isNotEmpty()) Text("${errors.size} 个失败",Modifier.clickable {showErrors=true},style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.error)}
-            val grouped=results.groupBy { it.title.trim().lowercase()+"|"+it.author.trim().lowercase().ifBlank { it.sourceId } }
+            val grouped=remember(results) { results.groupBy { it.title.trim().lowercase()+"|"+it.author.trim().lowercase().ifBlank { it.sourceId } } }
             LazyColumn(contentPadding=PaddingValues(horizontal=24.dp,vertical=8.dp)) {
                 if(results.isEmpty() && !searching && done==0) {
-                    item {Text("最近搜索",color=Muted,modifier=Modifier.padding(vertical=12.dp))}
+                    item {
+                        Text("从经典开始",style=MaterialTheme.typography.titleLarge,modifier=Modifier.padding(top=24.dp,bottom=8.dp))
+                        Text("内置精选版本 · 搜索书名或作者即可阅读",color=Muted,style=MaterialTheme.typography.bodySmall)
+                        Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            BuiltinSources.editions.forEach { edition -> SuggestionChip(onClick={query=edition.title;keyboard?.hide();model.search(query,group)},label={Text(edition.title)}) }
+                        }
+                        if(histories.isNotEmpty()) Text("最近搜索",color=Muted,modifier=Modifier.padding(vertical=12.dp))
+                    }
                     items(histories.takeLast(12).reversed()) { h -> ListItem(headlineContent={Text(h.id)},leadingContent={Icon(Icons.Outlined.History,null)},modifier=Modifier.clickable {query=h.id;model.search(query,group)}) }
                 }
                 if(results.isEmpty() && !searching && done>0) item {Text("没有找到结果。可以尝试其他关键词，或查看书源失败信息。",Modifier.padding(vertical=28.dp),color=Muted)}
@@ -73,7 +86,8 @@ import java.io.File
         PageHeader("书源管理","${sources.count { it.enabled }} / ${sources.size} 个书源已启用",onBack) {IconButton(onClick=onExport) {Icon(Icons.Outlined.IosShare,"导出书源")}}
         Row(Modifier.padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)) {Button(onClick=onFile) {Text("从文件导入")}; OutlinedButton(onClick=onPaste) {Text("链接 / 粘贴")}}
         if(sources.isNotEmpty()) OutlinedTextField(query,{query=it},Modifier.fillMaxWidth().padding(24.dp,12.dp),placeholder={Text("搜索书源名称、分组")},singleLine=true)
-        if(sources.isEmpty()) EmptyState("书源由你选择","万卷不内置书源。导入后将显示规则兼容情况。","导入书源",onPaste)
+        TextButton(onClick={model.run("已补充缺失的内置书源") {BuiltinSources.install(model.library,true)}},modifier=Modifier.padding(horizontal=16.dp)) {Icon(Icons.Outlined.LibraryBooks,null,Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("恢复内置经典书源")}
+        if(sources.isEmpty()) EmptyState("书源由你选择","恢复内置经典书源，或导入你自己的书源。","导入书源",onPaste)
         else LazyColumn(contentPadding=PaddingValues(16.dp)) {items(sources.filter { query.isBlank() || it.name.contains(query,true) || it.group.contains(query,true) },key={it.id}) { s ->
             ListItem(headlineContent={Text(s.name)},supportingContent={Column {Text(s.group,color=Muted);Text(s.status,style=MaterialTheme.typography.bodySmall,maxLines=2)}},trailingContent={Switch(s.enabled,{model.run {model.library.save(s.copy(enabled=it))}})},modifier=Modifier.clickable {selected=s})
             HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.4f))

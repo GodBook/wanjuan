@@ -25,6 +25,8 @@ import io.github.godbook.wanjuan.reader.ReadingView
 import kotlinx.coroutines.*
 import java.io.File
 
+private data class ReaderText(val raw: String,val from: String,val to: String,val indent: Boolean)
+
 @Composable fun ReaderScreen(model: AppModel,activity: MainActivity,onSources: ()->Unit) {
     val book by model.reader.collectAsState()
     val raw by model.body.collectAsState()
@@ -33,7 +35,7 @@ import java.io.File
     val marks by model.marks.collectAsState()
     val sourceList by model.sources.collectAsState()
     val b=book ?: return
-    val profile=Profile.resolve(global,b.profile)
+    val profile=remember(global,b.profile) {Profile.resolve(global,b.profile)}
     var menu by remember {mutableStateOf(false)}
     var sheet by remember {mutableStateOf("")}
     var prompt by remember {mutableStateOf<Prompt?>(null)}
@@ -47,10 +49,15 @@ import java.io.File
     var clock by remember {mutableStateOf("")}
     val fg=Color(ReadingView.foreground(profile))
     val bg=Color(ReadingView.background(profile))
-    val transformed=remember(raw,profile.replaceFrom,profile.replaceTo,profile.indent,profile.paragraph) {
-        val cleaned=if(profile.replaceFrom.isNotBlank()) raw.replace(profile.replaceFrom,profile.replaceTo) else raw
-        cleaned.lines().map {it.trim()}.filter {it.isNotBlank()}.joinToString("\n") { if(profile.indent && !it.startsWith("[[wanjuan-image:")) "　　$it" else it }
+    val textInput=remember(raw,profile.replaceFrom,profile.replaceTo,profile.indent) { ReaderText(raw,profile.replaceFrom,profile.replaceTo,profile.indent) }
+    val processed by produceState<Pair<ReaderText,String>?>(null,textInput) {
+        value=textInput to withContext(Dispatchers.Default) {
+            val cleaned=if(textInput.from.isNotBlank()) textInput.raw.replace(textInput.from,textInput.to) else textInput.raw
+            cleaned.lineSequence().map {it.trim()}.filter {it.isNotBlank()}.joinToString("\n") { if(textInput.indent && !it.startsWith("[[wanjuan-image:")) "　　$it" else it }
+        }
     }
+    // Never display or persist the previous chapter while its replacement is being prepared.
+    val transformed=processed?.takeIf {it.first===textInput}?.second.orEmpty()
     LaunchedEffect(Unit) {while(true) {clock=java.text.SimpleDateFormat("HH:mm",java.util.Locale.CHINA).format(java.util.Date());delay(30000)}}
     DisposableEffect(profile.awake,profile.brightness,profile.volume,profile.orientation) {
         val window=activity.window

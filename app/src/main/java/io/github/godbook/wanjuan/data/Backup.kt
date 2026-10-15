@@ -77,6 +77,7 @@ class Backup(private val library: Library) {
                 "source" -> require(Source.decode(r.payload).id==r.id)
                 "mark" -> require(Mark.decode(r.payload).id==r.id)
                 "history","preset" -> Unit
+                "builtin" -> require(r.id=="installed-v1" && r.payload=="1") { "内置书源状态无效" }
                 else -> error("未知记录类型：${r.kind}")
             } }
             val snapshot=create()

@@ -4,6 +4,7 @@ import android.content.Context
 import io.github.godbook.wanjuan.data.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.json.*
@@ -17,6 +18,7 @@ data class ImportCandidate(val source: Source, val warnings: List<String>)
 data class SearchEvent(val source: Source, val books: List<Book> = emptyList(), val error: String? = null)
 class SourceEngine(context: Context) {
     private val scripts = Scripts(context)
+    private val builtins = BuiltinSources(context)
     private val hosts = ConcurrentHashMap<String,Semaphore>()
     fun inspect(text: String): List<ImportCandidate> {
         require(text.length <= 8*1024*1024) { "书源文件超过 8MB" }
@@ -32,7 +34,8 @@ class SourceEngine(context: Context) {
             if(j.toString().contains("webView",true)) warnings += "不支持动态网页"
             if(j.text("loginUrl").isNotBlank()) warnings += "登录流程不支持"
             if(j.toString().contains("@put:") || j.toString().contains("@get:")) warnings += "变量存取规则尚不支持"
-            val id = sha256(url.toString().toByteArray()).take(32)
+            val id = BuiltinSources.defaults().find { it.url==url.toString() && it.json.optString("wanjuanProvider")==j.optString("wanjuanProvider") }?.id ?: sha256(url.toString().toByteArray()).take(32)
+            if(id.startsWith("builtin-")) warnings.clear()
             ImportCandidate(Source(id,j.toString(),j.optBoolean("enabled",true),false,if(warnings.isEmpty()) "待检测 · 常用规则" else warnings.joinToString("；")),warnings)
         }
     }
@@ -46,7 +49,7 @@ class SourceEngine(context: Context) {
                 catch (e: Exception) { send(SearchEvent(source,error = e.message ?: "解析失败")) }
             }
         } }
-    }
+    }.flowOn(Dispatchers.IO)
     private suspend fun request(source: Source, expression: String, query: String = ""): String {
         val expanded = expression.replace("{{key}}",URLEncoder.encode(query,"UTF-8")).replace("{{page}}","1").replace("{{searchKey}}",URLEncoder.encode(query,"UTF-8"))
         val split = expanded.indexOf(",{\"").takeIf { it >= 0 } ?: expanded.indexOf(",{ ").takeIf { it >= 0 }
@@ -68,6 +71,7 @@ class SourceEngine(context: Context) {
         return if(index > 0) scripts.execute(rule.substring(index+4),Rules.value(input,rule.substring(0,index),base)) else Rules.value(input,rule,base)
     }
     suspend fun searchOne(query: String, source: Source): List<Book> {
+        if(BuiltinSources.provider(source)!=null) return builtins.search(query,source)
         val j = source.json
         val html = request(source,j.getString("searchUrl"),query)
         val rules = j.getJSONObject("ruleSearch")
@@ -79,6 +83,7 @@ class SourceEngine(context: Context) {
         }
     }
     suspend fun catalog(book: Book, source: Source): Book {
+        if(BuiltinSources.provider(source)!=null) return builtins.catalog(book,source)
         val info = source.json.optJSONObject("ruleBookInfo") ?: JSONObject()
         val detail = request(source,book.url)
         val toc = value(detail,info.text("tocUrl"),book.url).ifBlank { book.url }
@@ -105,6 +110,7 @@ class SourceEngine(context: Context) {
         return book.copy(tocUrl=tocUrl,chapters=chapters.values.toList(),intro=value(detail,info.text("intro"),book.url).ifBlank { book.intro })
     }
     suspend fun content(chapter: Chapter, source: Source): String {
+        if(BuiltinSources.provider(source)!=null) return builtins.content(chapter,source)
         val rules = source.json.getJSONObject("ruleContent")
         val pages = mutableListOf<String>()
         var page = chapter.url

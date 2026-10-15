@@ -28,6 +28,7 @@ class ReadingUiTest {
         assertTrue("书架应出现测试书",device.wait(Until.hasObject(By.text(book.title)),20000))
         device.findObjects(By.text(book.title)).first().click()
         assertTrue("阅读页应显示页码",device.wait(Until.hasObject(By.textContains("页")),10000))
+        assertTrue("正文排版完成后再翻页",device.wait(Until.hasObject(By.descContains("这是第1段阅读验收文字")),20000))
         device.click((device.displayWidth*.88).toInt(),device.displayHeight/2)
         assertTrue("右侧点击应进入第二页",device.wait(Until.hasObject(By.textContains("2/")),5000))
         delay(500)
@@ -46,6 +47,24 @@ class ReadingUiTest {
         assertTrue(device.wait(Until.hasObject(By.text("万卷")),5000))
         device.findObjects(By.text(book.title)).first().click()
         assertTrue(device.wait(Until.hasObject(By.textContains("2/")),5000))
+        // Rapid taps exercise cancellation without retaining or recycling full-screen bitmaps.
+        for(mode in listOf(0,1,2)) {
+            app.library.saveProfile(Profile(mode=mode))
+            delay(400)
+            repeat(5) {
+                device.click((device.displayWidth*.88).toInt(),device.displayHeight/2)
+                delay(70)
+                device.click((device.displayWidth*.12).toInt(),device.displayHeight/2)
+                delay(70)
+            }
+            assertTrue("模式 $mode 快速翻页后应回到第二页",device.wait(Until.hasObject(By.textContains("2/")),5000))
+        }
+        app.library.saveProfile(Profile(mode=3));delay(500)
+        val beforeScroll=app.library.book(book.id)!!.offset
+        device.swipe(device.displayWidth/2,(device.displayHeight*.7).toInt(),device.displayWidth/2,(device.displayHeight*.3).toInt(),20)
+        delay(1000)
+        assertTrue("滚动模式应保存向前的正文位置",app.library.book(book.id)!!.offset>beforeScroll)
+        app.library.saveProfile(Profile())
         device.pressBack()
         app.library.removeBook(book.id);file.delete()
     }

@@ -15,13 +15,18 @@ class Network(private val http: Boolean = false, private val privateHost: Boolea
         require(url.isHttps || http) { "此书源使用 HTTP，请在书源管理中允许明文连接" }
         require(url.username.isEmpty() && url.password.isEmpty()) { "地址不能包含用户名或密码" }
     }
-    val client = OkHttpClient.Builder().connectTimeout(10,TimeUnit.SECONDS).readTimeout(20,TimeUnit.SECONDS)
+    val client: OkHttpClient get() = if(privateHost) privateClient else publicClient
+    companion object {
+    private val publicClient by lazy { buildClient(false) }
+    private val privateClient by lazy { buildClient(true) }
+    private fun buildClient(privateHost: Boolean) = OkHttpClient.Builder().connectTimeout(10,TimeUnit.SECONDS).readTimeout(20,TimeUnit.SECONDS)
         .callTimeout(30,TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false)
         .dns(object: Dns { override fun lookup(hostname: String): List<InetAddress> = Dns.SYSTEM.lookup(hostname).also { addresses ->
             if (!privateHost && !(BuildConfig.DEBUG && hostname in listOf("localhost","127.0.0.1"))) {
                 require(addresses.none { it.isAnyLocalAddress || it.isLoopbackAddress || it.isLinkLocalAddress || it.isSiteLocalAddress || it.isMulticastAddress || (it.address.size == 16 && (it.address[0].toInt() and 0xfe) == 0xfc) }) { "书源不能访问本地或私有网络" }
             }
         } }).build()
+    }
     suspend fun bytes(url: String, headers: Map<String,String> = emptyMap(), method: String = "GET", body: RequestBody? = null, limit: Long = 8L*1024*1024): ByteArray = withContext(Dispatchers.IO) {
         var current = url.toHttpUrl()
         var currentHeaders = headers

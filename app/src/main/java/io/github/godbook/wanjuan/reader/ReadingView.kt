@@ -35,13 +35,19 @@ class ReadingView(context: Context): View(context) {
     private var backgroundImage: Bitmap?=null
     private var visualKey=""
     private var contentToken=-1
-    private var oldFrame: Bitmap?=null
+    private var oldPage: Int?=null
+    private val imagePaint=Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha=45 }
+    private val imageRect=Rect()
+    private val scroller=android.widget.OverScroller(context)
+    private var lastReportedOffset=-1
+    private var backgroundJob: Job?=null
+    @Volatile private var fontCache="" to Typeface.create("sans-serif",Typeface.NORMAL)
     private var turnAnimator: android.animation.ValueAnimator?=null
     private var turnProgress=1f
     private var turnDirection=1
     private val paint=TextPaint(Paint.ANTI_ALIAS_FLAG)
     private val detector=GestureDetector(context,object: GestureDetector.SimpleOnGestureListener() {
-        override fun onDown(e: android.view.MotionEvent)=true
+        override fun onDown(e: android.view.MotionEvent): Boolean { scroller.forceFinished(true);return true }
         override fun onSingleTapUp(e: android.view.MotionEvent): Boolean {
             when { e.x < width*0.3 -> turn(profile.leftHand); e.x > width*0.7 -> turn(!profile.leftHand); else -> { performClick(); onMenu() } }
             return true
@@ -56,6 +62,7 @@ class ReadingView(context: Context): View(context) {
             else if(profile.mode==3 && abs(velocityY)>1200) {
                 if(velocityY<0 && scrollYpx >= ((layout?.height ?: 0)-viewport).coerceAtLeast(0f)) onBoundary(true)
                 else if(velocityY>0 && scrollYpx<=0) onBoundary(false)
+                else { scroller.fling(0,scrollYpx.toInt(),0,-velocityY.toInt(),0,0,0,((layout?.height ?: 0)-viewport).coerceAtLeast(0f).toInt());postInvalidateOnAnimation() }
             }
             return true
         }
@@ -63,32 +70,48 @@ class ReadingView(context: Context): View(context) {
     init { isFocusable=true; importantForAccessibility=IMPORTANT_FOR_ACCESSIBILITY_YES }
     fun setContent(body: String, p: Profile, offset: Int, quote: String, token: Int=0) {
         if(text==body && profile==p && contentToken==token) return
+        val needsLayout=text!=body || contentToken!=token || profile.size!=p.size || profile.line!=p.line || profile.margin!=p.margin || profile.paragraph!=p.paragraph || profile.letter!=p.letter || profile.font!=p.font || profile.mode!=p.mode
+        turnAnimator?.cancel();oldPage=null;scroller.forceFinished(true)
         contentToken=token
         desired=offset; anchor=quote; text=body; profile=p
         val key=p.background
-        if(key!=visualKey) { backgroundImage?.recycle(); backgroundImage=null; visualKey=key
-            if(key.isNotBlank()) backgroundImage=runCatching { BitmapFactory.decodeFile(key,BitmapFactory.Options().apply { inSampleSize=2 }) }.getOrNull()
+        if(key!=visualKey) { backgroundJob?.cancel(); backgroundImage=null; visualKey=key
+            if(key.isNotBlank()) backgroundJob=scope.launch {
+                val image=withContext(Dispatchers.IO) {
+                    val options=BitmapFactory.Options().apply { inJustDecodeBounds=true };BitmapFactory.decodeFile(key,options)
+                    var sample=1
+                    while(options.outWidth/sample>1440 || options.outHeight/sample>2560) sample*=2
+                    runCatching { BitmapFactory.decodeFile(key,BitmapFactory.Options().apply { inSampleSize=sample }) }.getOrNull()
+                }
+                ensureActive();backgroundImage=image;invalidate()
+            }
         }
-        render()
+        if(needsLayout) render() else { layout?.paint?.color=foreground(p);invalidate() }
     }
     override fun onSizeChanged(w: Int,h: Int,oldw: Int,oldh: Int) { super.onSizeChanged(w,h,oldw,oldh); render() }
     private fun render() {
         if(width<=0 || height<=0 || text.isBlank()) return
-        job?.cancel()
+        job?.cancel();turnAnimator?.cancel();oldPage=null
         margin=profile.margin*resources.displayMetrics.density
         top=12*resources.displayMetrics.density
         viewport=(height-top*2).coerceAtLeast(50f)
         paint.textSize=profile.size*resources.displayMetrics.scaledDensity
         paint.letterSpacing=profile.letter
-        paint.typeface=if(profile.font.isNotBlank()) runCatching { Typeface.createFromFile(profile.font) }.getOrDefault(Typeface.DEFAULT) else Typeface.create("sans-serif",Typeface.NORMAL)
         paint.color=foreground(profile)
         val content=text
         val width=(width-margin*2).toInt().coerceAtLeast(30)
         val style=TextPaint(paint)
         val spacing=profile.line
         val paragraphGap=(profile.paragraph*resources.displayMetrics.density).toInt()
+        val font=profile.font
+        val availableHeight=viewport
         job=scope.launch {
             val built=withContext(Dispatchers.Default) {
+                val cachedFont=fontCache
+                style.typeface=if(font==cachedFont.first) cachedFont.second else {
+                    val resolved=if(font.isNotBlank()) runCatching { Typeface.createFromFile(font) }.getOrDefault(Typeface.DEFAULT) else Typeface.create("sans-serif",Typeface.NORMAL)
+                    fontCache=font to resolved;resolved
+                }
                 val styled=android.text.SpannableStringBuilder(content)
                 Regex("\\[\\[wanjuan-image:([^\\]]+)\\]\\]").findAll(content).toList().asReversed().forEach {match ->
                     val root=File(context.filesDir,"library").canonicalFile
@@ -101,7 +124,7 @@ class ReadingView(context: Context): View(context) {
                             val bitmap=BitmapFactory.decodeFile(file.path,BitmapFactory.Options().apply {inSampleSize=sample})
                             if(bitmap!=null) {
                                 val drawable=android.graphics.drawable.BitmapDrawable(resources,bitmap)
-                                val scale=minOf(width.toFloat()/bitmap.width,viewport*.75f/bitmap.height,1f)
+                                val scale=minOf(width.toFloat()/bitmap.width,availableHeight*.75f/bitmap.height,1f)
                                 drawable.setBounds(0,0,(bitmap.width*scale).toInt(),(bitmap.height*scale).toInt())
                                 styled.replace(match.range.first,match.range.last+1,"\uFFFC")
                                 styled.setSpan(android.text.style.ImageSpan(drawable),match.range.first,match.range.first+1,android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
@@ -120,6 +143,8 @@ class ReadingView(context: Context): View(context) {
             }
             ensureActive()
             layout=built
+            built.paint.color=foreground(profile)
+            lastReportedOffset=-1
             displayText=built.text.toString()
             val starts=mutableListOf(0)
             var first=0
@@ -134,21 +159,26 @@ class ReadingView(context: Context): View(context) {
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val old=oldPage
+        drawPage(canvas,page,if(old!=null && profile.mode==1) turnDirection*width*(1f-turnProgress) else 0f)
+        if(old!=null) drawPage(canvas,old,-turnDirection*width*turnProgress)
+    }
+    private fun drawPage(canvas: Canvas,index: Int,translation: Float) {
+        val saved=canvas.save()
+        canvas.translate(translation,0f)
+        canvas.clipRect(0,0,width,height)
         canvas.drawColor(background(profile))
-        canvas.save()
-        if(oldFrame!=null && profile.mode==1) canvas.translate(turnDirection*width*(1f-turnProgress),0f)
-        backgroundImage?.let { canvas.drawBitmap(it,null,Rect(0,0,width,height),Paint().apply { alpha=45 }) }
-        val built=layout ?: return
-        canvas.save()
-        val y=if(profile.mode==3) scrollYpx else built.getLineTop(pages[page]).toFloat()
-        val lastLine=(pages.getOrNull(page+1) ?: built.lineCount)-1
+        imageRect.set(0,0,width,height)
+        backgroundImage?.let { canvas.drawBitmap(it,null,imageRect,imagePaint) }
+        val built=layout
+        if(built==null) { canvas.restoreToCount(saved);return }
+        val y=if(profile.mode==3) scrollYpx else built.getLineTop(pages[index]).toFloat()
+        val lastLine=(pages.getOrNull(index+1) ?: built.lineCount)-1
         val bottom=if(profile.mode==3) height-top else (top+built.getLineBottom(lastLine)-y).coerceAtMost(height-top)
         canvas.clipRect(margin,top,width-margin,bottom)
         canvas.translate(margin,top-y)
         built.draw(canvas)
-        canvas.restore()
-        canvas.restore()
-        oldFrame?.let { canvas.drawBitmap(it,-turnDirection*width*turnProgress,0f,null) }
+        canvas.restoreToCount(saved)
     }
     fun turn(forward: Boolean) {
         val built=layout ?: return
@@ -160,17 +190,16 @@ class ReadingView(context: Context): View(context) {
         }
         val next=page+if(forward) 1 else -1
         if(next !in pages.indices) onBoundary(forward) else {
-            turnAnimator?.cancel();oldFrame?.recycle();oldFrame=null
+            turnAnimator?.cancel();oldPage=null
             val animated=profile.mode in 0..1 && android.animation.ValueAnimator.areAnimatorsEnabled()
             if(animated) {
-                val frame=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
-                draw(Canvas(frame));oldFrame=frame;turnProgress=0f;turnDirection=if(forward) 1 else -1
+                oldPage=page;turnProgress=0f;turnDirection=if(forward) 1 else -1
             }
             page=next; invalidate(); position()
             if(animated) {
                 turnAnimator=android.animation.ValueAnimator.ofFloat(0f,1f).apply {
                     duration=180;addUpdateListener {turnProgress=it.animatedValue as Float;invalidate()}
-                    addListener(object: android.animation.AnimatorListenerAdapter() {override fun onAnimationEnd(animation: android.animation.Animator) {oldFrame?.recycle();oldFrame=null;invalidate()}})
+                    addListener(object: android.animation.AnimatorListenerAdapter() {override fun onAnimationEnd(animation: android.animation.Animator) {oldPage=null;invalidate()}})
                     start()
                 }
             }
@@ -180,6 +209,9 @@ class ReadingView(context: Context): View(context) {
         val l=layout ?: return
         val line=if(profile.mode==3) l.getLineForVertical(scrollYpx.toInt()) else pages[page]
         val offset=l.getLineStart(line)
+        if(offset==lastReportedOffset) return
+        lastReportedOffset=offset
+        if(profile.mode==3) page=pages.indexOfLast {it<=line}.coerceAtLeast(0)
         desired=offset; anchor=displayText.substring(offset,(offset+36).coerceAtMost(displayText.length))
         onPosition(offset,anchor,page+1,pages.size)
         contentDescription=displayText.substring(offset,(if(profile.mode==3) offset+1500 else pages.getOrNull(page+1)?.let { l.getLineStart(it) } ?: displayText.length).coerceAtMost(displayText.length)).replace("\uFFFC","【插图】")
@@ -195,7 +227,10 @@ class ReadingView(context: Context): View(context) {
         AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> { turn(false); true }
         else -> super.performAccessibilityAction(action,arguments)
     }
-    override fun onDetachedFromWindow() { job?.cancel();turnAnimator?.cancel();oldFrame?.recycle();oldFrame=null;backgroundImage?.recycle();backgroundImage=null;super.onDetachedFromWindow() }
+    override fun computeScroll() {
+        if(scroller.computeScrollOffset()) { scrollYpx=scroller.currY.toFloat();position();postInvalidateOnAnimation() }
+    }
+    override fun onDetachedFromWindow() { job?.cancel();backgroundJob?.cancel();turnAnimator?.cancel();scroller.forceFinished(true);oldPage=null;backgroundImage=null;visualKey="";super.onDetachedFromWindow() }
     companion object {
         fun locate(text: String, offset: Int, anchor: String): Int {
             if(offset==Int.MAX_VALUE) return text.length

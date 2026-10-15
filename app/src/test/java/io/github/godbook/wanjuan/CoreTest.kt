@@ -7,6 +7,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CoreTest {
+    @Test fun gutenbergSplitsChaptersAndJoinsHardWraps() {
+        val input="header\n*** START OF THE PROJECT GUTENBERG EBOOK TEST ***\n第一回 初见\n-----\n第一段硬\n换行。\n\n第二段。\n第二回 再会\n正文结束。\n*** END OF THE PROJECT GUTENBERG EBOOK TEST ***\nlicense"
+        val chapters=io.github.godbook.wanjuan.source.BuiltinSources.splitGutenberg(input)
+        assertEquals(2,chapters.size)
+        assertEquals("第一回 初见",chapters[0].first)
+        assertEquals("第一段硬换行。\n\n第二段。",chapters[0].second)
+        assertFalse(chapters.last().second.contains("license"))
+    }
+    @Test fun gutenbergRejectsErrorPages() {
+        assertTrue(runCatching {io.github.godbook.wanjuan.source.BuiltinSources.splitGutenberg("<html>Service unavailable</html>")}.isFailure)
+    }
+    @Test fun gutenbergIgnoresCreditsAndInParagraphChapterMentions() {
+        val input="*** START OF THE PROJECT GUTENBERG EBOOK TEST ***\nProduced by Example\n第一回 开篇\n第四回中曾说起这件事，\n如今接着往下说。\n第一○回 续篇\n另一章。\n*** END OF THE PROJECT GUTENBERG EBOOK TEST ***"
+        val chapters=io.github.godbook.wanjuan.source.BuiltinSources.splitGutenberg(input)
+        assertEquals(2,chapters.size)
+        assertTrue(chapters.first().second.startsWith("第四回中"))
+        assertFalse(chapters.first().second.contains("Produced by"))
+    }
     @Test fun textChaptersPreservePrefaceAndLastChapter() {
         val input="序言内容\n第一章 初见\n这是第一章。\n第二章 重逢\n这是最后一章。"
         val parts=BookImporter.splitText(input)

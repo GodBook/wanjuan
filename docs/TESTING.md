@@ -2,6 +2,21 @@
 
 本文件由实际执行结果更新；不将源码中的测试用例等同于已经通过。
 
+## 0.1.1 回归验证（2026-10-15）
+
+- JVM：13 项通过，含古登堡硬换行、分章、卷首制作说明、特殊数字和错误页面回归。
+- Android Lint Debug：通过，无错误；弃用 API 等警告仍保留。
+- 小米 9 SE / Android 15：10 项仪器测试全部通过，46.669 秒。包含真实联网书源验证。
+- Android 10 / API 29：9 项通过，1 项联网测试按设计跳过，45.762 秒。仪器汇总为 `OK (10 tests)`，不将跳过项计为通过。
+- 阅读界面覆盖三种分页模式的快速往返翻页、上下滚动、书签、设置及重进后的进度；Android 10 的自动化明确等待正文排版完成再点击。
+- 内置书源初始化、关闭后不重新启用、删除后不自动恢复、手动补回、导出识别与备份恢复通过验证。
+
+真实联网检查：维基文库《红楼梦》120 回、《西游记》100 回、《三国演义》120 回、《儒林外史》56 回；古登堡《红楼梦》120 回、《西游记》100 回。六个版本均验证目录数量及首章、中间章、末章正文。只代表当次网络环境可用，不等于所有地区、所有时段可用。
+
+本地证据：`artifacts/011-phone-acceptance.log`、`artifacts/011-android10-final.log`、`artifacts/optimization-verified-build.log`，以及 JVM XML。联网测试默认跳过，发布验收时使用 `am instrument -w -r -e liveSources true io.github.godbook.wanjuan.debug.test/androidx.test.runner.AndroidJUnitRunner` 显式启用。
+
+以下保留 0.1.0 的历史验收记录。
+
 ## 环境
 
 - 开发：Windows，JDK 17，Android SDK 35，Gradle 8.14.2。

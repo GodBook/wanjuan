@@ -12,9 +12,9 @@ fun JSONArray.objects(): List<JSONObject> = (0 until length()).map { getJSONObje
 
 data class Source(val id: String, val raw: String, val enabled: Boolean = true, val http: Boolean = false, val status: String = "尚未检测") {
     val json get() = JSONObject(raw)
-    val name get() = json.text("bookSourceName", "未命名书源")
-    val url get() = json.text("bookSourceUrl")
-    val group get() = json.text("bookSourceGroup", "默认")
+    val name by lazy { json.text("bookSourceName", "未命名书源") }
+    val url by lazy { json.text("bookSourceUrl") }
+    val group by lazy { json.text("bookSourceGroup", "默认") }
     fun encode() = JSONObject().put("id", id).put("raw", raw).put("enabled", enabled).put("http", http).put("status", status).toString()
     companion object { fun decode(s: String) = JSONObject(s).let { Source(it.getString("id"), it.getString("raw"), it.optBoolean("enabled", true), it.optBoolean("http"), it.text("status", "尚未检测")) } }
 }

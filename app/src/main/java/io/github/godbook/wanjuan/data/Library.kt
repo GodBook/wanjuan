@@ -34,9 +34,9 @@ class Library(val context: Context) {
     val root = File(context.filesDir, "library")
     init { recoverRestore(); root.mkdirs() }
     val mutation = Mutex()
-    val books = dao.observe("book").map { r -> r.map { Book.decode(it.payload) }.sortedWith(compareByDescending<Book> { it.pinned }.thenByDescending { it.updated }) }
-    val sources = dao.observe("source").map { r -> r.map { Source.decode(it.payload) }.sortedBy { it.name } }
-    val marks = dao.observe("mark").map { r -> r.map { Mark.decode(it.payload) } }
+    val books = dao.observe("book").distinctUntilChanged().map { r -> r.map { Book.decode(it.payload) }.sortedWith(compareByDescending<Book> { it.pinned }.thenByDescending { it.updated }) }.flowOn(Dispatchers.Default)
+    val sources = dao.observe("source").distinctUntilChanged().map { r -> r.map { Source.decode(it.payload) }.sortedBy { it.name } }.flowOn(Dispatchers.Default)
+    val marks = dao.observe("mark").distinctUntilChanged().map { r -> r.map { Mark.decode(it.payload) } }.flowOn(Dispatchers.Default)
     val profile = context.settings.data.map { Profile.from(it[stringPreferencesKey("profile")] ?: "{}") }
     val preferences = context.settings.data.map { org.json.JSONObject(it[stringPreferencesKey("preferences")] ?: "{}") }
     suspend fun preference(name: String,value: String) { context.settings.edit { values -> val p=org.json.JSONObject(values[stringPreferencesKey("preferences")] ?: "{}");p.put(name,value);values[stringPreferencesKey("preferences")]=p.toString() } }
@@ -47,7 +47,7 @@ class Library(val context: Context) {
     suspend fun save(mark: Mark) { mutation.withLock { dao.put(Record("mark", mark.id, mark.encode())) } }
     suspend fun book(id: String) = dao.get("book", id)?.let { Book.decode(it.payload) }
     suspend fun source(id: String) = dao.get("source", id)?.let { Source.decode(it.payload) }
-    suspend fun updateBook(id: String, update: (Book)->Book) { mutation.withLock { book(id)?.let { dao.put(Record("book",id,update(it).encode())) } } }
+    suspend fun updateBook(id: String, update: (Book)->Book) = withContext(Dispatchers.IO) { mutation.withLock { book(id)?.let { dao.put(Record("book",id,update(it).encode())) } } }
     suspend fun removeBook(id: String) { mutation.withLock { db.withTransaction {
         dao.delete("book",id)
         dao.list("mark").filter { Mark.decode(it.payload).bookId == id }.forEach { dao.delete("mark",it.id) }
