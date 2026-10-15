@@ -16,6 +16,30 @@
 
 本地证据：`artifacts/011-phone-release-gate.log`、`artifacts/011-android10-release-gate.log`、`artifacts/011-system-bars-build.log`，以及 JVM XML。联网测试默认跳过，发布验收时使用 `am instrument -w -r -e liveSources true io.github.godbook.wanjuan.debug.test/androidx.test.runner.AndroidJUnitRunner` 显式启用。
 
+### 0.1.1 正式包与同机性能对比
+
+发布包来自 GitHub Actions `38738980553`，生产源码提交 `9d2fb53`；该签名构建及 Android checks `38738978460` 均成功，包含 Release Lint 检查。包名不变，versionCode 101 / versionName 0.1.1。APK 为 4,997,317 字节，比 0.1.0 增加 32 KiB。
+
+APK SHA-256：`a542c9820152bf725b94850a9f62f033e7aceacfb6a2dfd620e324bf464d79ea`。证书 SHA-256 与 0.1.0 相同：`d034cee01f15886cc4fb6ca20250ee49449f4f9bd3c64254e0e7a12788b4339c`。
+
+正式签名包还通过实际界面的“搜索 → 选择来源 → 开始阅读”分别打开维基文库及古登堡《红楼梦》，确认正文可见且无目录导航残留。
+
+本轮通过 adb 同签名覆盖安装正式包，确认版本升至 101，书架仍保留《山间来信》，三轮往返翻页后均回到原第 1 章第 2 / 11 页。0.1.0 的真实应用内更新验收记录保留在下方；本轮覆盖安装不冒充再次执行了在线安装器流程。
+
+对比方法：同一台小米 9 SE、1080×2340、默认排版与覆盖翻页、同一部自编测试小说《山间来信》；每轮强制停止应用后启动，从书架进入原位置，等待 2 秒，重置 `gfxinfo`，执行 10 组“下一页→上一页”（共 20 次翻页，每次后等待 0.3 秒），随后读取 `gfxinfo` 与 `meminfo`。每版独立执行三轮，均采集 240 帧。表中展示三轮中位数，并保留全部样本：
+
+| 指标 | 0.1.0 | 0.1.1 |
+| --- | --- | --- |
+| 翻页后 PSS | 217,317 KiB（约 212.2 MiB） | 73,167 KiB（约 71.5 MiB） |
+| 翻页后 RSS | 322,476 KiB | 177,552 KiB |
+| 帧耗时 P95 | 20 ms | 17 ms |
+| Janky frames | 20 / 240（8.33%） | 17 / 240（7.08%） |
+| 冷启动 TotalTime | 346 ms | 374 ms |
+
+PSS 约下降 66.3%，P95 约下降 15%。冷启动没有改善，不能宣传为全方位提速。原始三轮 PSS 分别为旧版 `216444 / 217317 / 217531`、新版 `74746 / 73163 / 73167` KiB；P95 为 `21 / 20 / 20` 和 `17 / 16 / 17` ms；冷启动为 `353 / 335 / 346` 和 `453 / 374 / 374` ms。
+
+这是固定场景的短时采样，不是长期内存上限、所有设备的流畅度保证或耗电结论。正式包、原始结果与执行脚本保存在本地 `artifacts/release-0.1.1/`、`artifacts/before-011*`、`artifacts/after-011*`、`artifacts/011-performance-before.json`、`artifacts/011-performance-after.json` 和 `artifacts/measure-reader.ps1`。
+
 以下保留 0.1.0 的历史验收记录。
 
 ## 环境
