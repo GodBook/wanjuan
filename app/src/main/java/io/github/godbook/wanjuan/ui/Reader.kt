@@ -49,6 +49,7 @@ private data class ReaderText(val raw: String,val from: String,val to: String,va
     var clock by remember {mutableStateOf("")}
     val fg=Color(ReadingView.foreground(profile))
     val bg=Color(ReadingView.background(profile))
+    LaunchedEffect(bg) { updateSystemBars(activity,androidx.core.graphics.ColorUtils.calculateLuminance(ReadingView.background(profile))>.5) }
     val textInput=remember(raw,profile.replaceFrom,profile.replaceTo,profile.indent) { ReaderText(raw,profile.replaceFrom,profile.replaceTo,profile.indent) }
     val processed by produceState<Pair<ReaderText,String>?>(null,textInput) {
         value=textInput to withContext(Dispatchers.Default) {

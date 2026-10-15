@@ -43,8 +43,9 @@ val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
     val preferences by model.library.preferences.collectAsState(org.json.JSONObject())
     val darkMode=preferences.optString("theme","0").toIntOrNull() ?: 0
     val dark=darkMode==2 || (darkMode==0 && isSystemInDarkTheme())
-    MaterialTheme(colorScheme=if(dark) darkColorScheme(primary=Color(0xffb6cbbb),background=Color(0xff171c19),surface=Color(0xff171c19),onSurface=Color(0xffe3e8df),onSurfaceVariant=Color(0xffaeb9af),secondaryContainer=Color(0xff293b31),onSecondaryContainer=Color(0xffd8e9db)) else lightColorScheme(primary=Ink,background=Color(0xfffaf9f5),surface=Color(0xfffaf9f5),onSurface=Color(0xff252f29),onSurfaceVariant=Color(0xff626e65),secondaryContainer=Color(0xffe7ece2),onSecondaryContainer=Ink), typography=Typography()) {
+    MaterialTheme(colorScheme=if(dark) darkColorScheme(primary=Color(0xffb6cbbb),onPrimary=Color(0xff193125),outline=Color(0xff87958b),outlineVariant=Color(0xff3f4b43),background=Color(0xff171c19),surface=Color(0xff171c19),onSurface=Color(0xffe3e8df),onSurfaceVariant=Color(0xffaeb9af),secondaryContainer=Color(0xff293b31),onSecondaryContainer=Color(0xffd8e9db)) else lightColorScheme(primary=Ink,onPrimary=Color.White,outline=Color(0xff838d83),outlineVariant=Color(0xffd7ddd3),background=Color(0xfffaf9f5),surface=Color(0xfffaf9f5),onSurface=Color(0xff252f29),onSurfaceVariant=Color(0xff626e65),secondaryContainer=Color(0xffe7ece2),onSecondaryContainer=Ink), typography=Typography()) {
         val reading by remember(model) { model.reader.map { it!=null }.distinctUntilChanged() }.collectAsState(false)
+        LaunchedEffect(dark,reading) { if(!reading) updateSystemBars(activity,!dark) }
         val busy by model.busy.collectAsState()
         val message by model.message.collectAsState()
         val snack=remember { SnackbarHostState() }
@@ -195,4 +196,12 @@ data class Prompt(val title: String,val hint: String,val initial: String="",val 
 }
 @Composable fun ActionRow(title: String,icon: ImageVector,subtitle: String="",onClick: ()->Unit) {
     ListItem(headlineContent={Text(title)},supportingContent=if(subtitle.isNotBlank()) {{Text(subtitle,color=Muted)}} else null,leadingContent={Icon(icon,null)},trailingContent={Icon(Icons.Outlined.ChevronRight,null,tint=Muted)},modifier=Modifier.clickable(onClick=onClick))
+}
+
+fun updateSystemBars(activity: MainActivity,lightBackground: Boolean) {
+    androidx.core.view.WindowInsetsControllerCompat(activity.window,activity.window.decorView).apply {
+        isAppearanceLightStatusBars=lightBackground
+        isAppearanceLightNavigationBars=lightBackground
+    }
+    activity.window.isNavigationBarContrastEnforced=false
 }
