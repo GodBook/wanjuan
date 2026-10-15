@@ -17,8 +17,8 @@
 | JSON | JSONPath，$ 或 @json: 前缀 |
 | XPath | // 或 @XPath: 前缀，节点集与属性 |
 | 组合 | 字段值的 || 回退、&& 连接 |
-| 正则 | ##pattern##replacement，拒绝部分高开销语法；输入长度有限制 |
-| JavaScript | 字段级 @js: 纯运算，result 输入；单次 1 秒指令预算、2.5 秒调用超时 |
+| 正则 | ##pattern##replacement，使用线性时间 RE2/J 子集，不支持回溯引用与环视 |
+| JavaScript | 字段级 @js: 纯运算，result 输入；单次 1 秒指令预算、含冷启动的调用上限 10 秒 |
 
 目录最多 30 页、正文最多 20 页；重复链接终止，防止分页循环。超过范围应拆分或修正书源。HTTP 必须在该书源设置中显式允许。书源不能请求私有网段；单书源不执行任意 Java 或 Android 方法。
 

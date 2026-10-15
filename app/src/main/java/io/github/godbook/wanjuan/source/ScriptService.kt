@@ -45,7 +45,9 @@ class Scripts(private val context: android.content.Context) {
         var connection: ServiceConnection? = null
         var bound = false
         try {
-            withTimeout(2500) {
+            // Cold-starting an isolated process on API 29 may take several seconds.
+            // The service independently enforces a 1 second instruction budget.
+            withTimeout(10000) {
                 suspendCancellableCoroutine { cont ->
                     val callback = Messenger(object: Handler(Looper.getMainLooper()) {
                         override fun handleMessage(msg: Message) {

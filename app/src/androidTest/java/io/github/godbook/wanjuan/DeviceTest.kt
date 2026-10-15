@@ -89,4 +89,14 @@ class DeviceTest {
         try {assertTrue(runCatching {Backup(app.library).restore(corrupt)}.isFailure);assertNotNull(app.library.book(b.id))}
         finally {app.library.removeBook(b.id);corrupt.delete()}
     }
+    @Test fun largeUtf8ImportDoesNotMisdetectPartialProbeCharacter()=runBlocking<Unit> {
+        val file=File(context.cacheDir,"large-utf8.txt")
+        val text="汉字阅读".repeat(10000)
+        file.writeText(text)
+        val book=BookImporter(app.library).importFile(file,"大文件验证.txt")
+        try {
+            val joined=book.chapters.joinToString("") {app.library.file(it.file).readText().replace("\n","")}
+            assertEquals(text,joined)
+        } finally {app.library.removeBook(book.id);file.delete()}
+    }
 }

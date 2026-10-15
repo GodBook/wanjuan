@@ -86,7 +86,10 @@ class BookImporter(private val library: Library) {
             val charset = if(encoding != "自动") java.nio.charset.Charset.forName(encoding) else when {
                 bytes.size >= 2 && bytes[0] == 0xff.toByte() && bytes[1] == 0xfe.toByte() -> Charsets.UTF_16LE
                 bytes.size >= 2 && bytes[0] == 0xfe.toByte() && bytes[1] == 0xff.toByte() -> Charsets.UTF_16BE
-                else -> if(runCatching { Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)); true }.getOrDefault(false)) Charsets.UTF_8 else java.nio.charset.Charset.forName("GB18030")
+                else -> if(runCatching {
+                    val result=Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes),java.nio.CharBuffer.allocate(bytes.size),file.length()<=bytes.size)
+                    !result.isError
+                }.getOrDefault(false)) Charsets.UTF_8 else java.nio.charset.Charset.forName("GB18030")
             }
             val parsed=mutableListOf<Chapter>()
             val heading=Regex("^[ \\t　]*(第[零〇一二三四五六七八九十百千万两0-9]+[章节卷回部篇][^\\n]{0,45}|(?:序章|楔子|前言|后记|尾声)[^\\n]{0,30})[ \\t]*$")
