@@ -117,7 +117,7 @@ import java.io.File
         item {Text("TXT 导入编码",Modifier.padding(24.dp,8.dp),style=MaterialTheme.typography.bodyMedium);Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf("自动","UTF-8","GB18030","UTF-16LE","UTF-16BE").forEach { e -> FilterChip(encoding==e,{onEncoding(e)},label={Text(e)})}}}
         item {SectionLabel("备份与恢复");ActionRow("导出备份",Icons.Outlined.SaveAlt,"包含书籍、书源、进度、笔记与阅读设置",onBackup);ActionRow("从文件恢复",Icons.Outlined.Restore,"校验后恢复完整快照",onRestore);ActionRow("WebDAV 备份",Icons.Outlined.CloudUpload,"使用你自己的云端存储",onDav)}
         item {SectionLabel("关于万卷");ActionRow("检查更新",Icons.Outlined.SystemUpdate,"当前版本 ${BuildConfig.VERSION_NAME}",onUpdate)}
-        item {Text("本地优先 · 无需账号\n不内置内容书源，不上传阅读数据。\n书源兼容范围请查看仓库文档。",Modifier.padding(24.dp),color=Muted,style=MaterialTheme.typography.bodySmall)}
+        item {Text("本地优先 · 无需账号\n内置经典书源，支持导入更多来源。\n书源兼容范围请查看仓库文档。",Modifier.padding(24.dp),color=Muted,style=MaterialTheme.typography.bodySmall)}
     }
 }
 @Composable fun SectionLabel(text: String) {Text(text,Modifier.padding(24.dp,22.dp,24.dp,8.dp),style=MaterialTheme.typography.labelMedium,color=Muted)}
