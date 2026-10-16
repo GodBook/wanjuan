@@ -266,7 +266,11 @@ class UpdateReliabilityTest {
                 val dump=File(context.cacheDir,"storage-settings-failure.xml");device.dumpWindowHierarchy(dump)
                 dump.readText().chunked(3000).forEach {android.util.Log.e("WanJuanAcceptance",it)}
             }
-            assertTrue("设置中应找到存储管理入口",storageVisible);device.waitForIdle();device.findObject(storageEntry).click()
+            assertTrue("设置中应找到存储管理入口",storageVisible);device.waitForIdle()
+            var storageRow=device.findObject(storageEntry)
+            while(!storageRow.isClickable && storageRow.parent!=null) storageRow=storageRow.parent
+            assertTrue("应点击可交互的存储管理行",storageRow.isClickable)
+            storageRow.click(100)
             val title="${book.title} · ${chapter.title}"
             val categoryVisible=device.wait(Until.hasObject(By.desc("展开本地书籍")),10000)
             if(!categoryVisible) {
