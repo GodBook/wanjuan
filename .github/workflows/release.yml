@@ -62,7 +62,14 @@ jobs:
       - name: Create draft release for device verification
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v$RELEASE_VERSION" release/* --title "万卷 $RELEASE_VERSION" --generate-notes --target "$GITHUB_SHA" --draft
+        run: |
+          if gh release view "v$RELEASE_VERSION" --json isDraft >/dev/null 2>&1; then
+            test "$(gh release view "v$RELEASE_VERSION" --json isDraft --jq .isDraft)" = "true"
+            gh release edit "v$RELEASE_VERSION" --target "$GITHUB_SHA"
+            gh release upload "v$RELEASE_VERSION" release/* --clobber
+          else
+            gh release create "v$RELEASE_VERSION" release/* --title "万卷 $RELEASE_VERSION" --generate-notes --target "$GITHUB_SHA" --draft
+          fi
       - name: Clean signing material
         if: always()
         run: rm -f signing.properties "$RUNNER_TEMP/wanjuan.p12"

@@ -241,4 +241,28 @@ class UpdateReliabilityTest {
             assertEquals(fileHash(input),hash);assertEquals(hash,fileHash(output));assertEquals(input.length(),output.length())
         } finally {server.shutdown();input.delete();output.delete()}
     }
+
+    @Test fun storageShowsBookTitlesAndOffersPathDetails()=runBlocking<Unit> {
+        val chapter=Chapter(title="第一章 溪流",file="books/storage-ui-${uid()}/0.txt")
+        val book=Book(title="存储标题验收",chapters=listOf(chapter))
+        library.putText(chapter.file,"存储界面验证正文");library.save(book)
+        assertFalse(Storage(library).scan().single {it.path==chapter.file}.removable)
+        device.wakeUp();device.executeShellCommand("wm dismiss-keyguard")
+        val scenario=ActivityScenario.launch(MainActivity::class.java)
+        try {
+            assertTrue(device.wait(Until.hasObject(By.text("设置")),10000));device.findObject(By.text("设置")).click()
+            assertTrue(device.wait(Until.hasObject(By.text("存储管理")),10000));device.findObject(By.text("存储管理")).click()
+            val title="${book.title} · ${chapter.title}"
+            assertTrue(device.wait(Until.hasObject(By.desc("展开本地书籍")),10000));device.findObject(By.desc("展开本地书籍")).click()
+            if(!device.hasObject(By.textContains(title))) device.findObject(By.scrollable(true))?.scrollUntil(Direction.DOWN,Until.findObject(By.textContains(title)))
+            val visible=device.wait(Until.hasObject(By.textContains(title)),15000)
+            if(!visible) device.dumpWindowHierarchy(File(context.cacheDir,"storage-ui-failure.xml"))
+            assertTrue("以书名和章节识别文件",visible)
+            assertFalse("路径应按需展开",device.hasObject(By.textContains(chapter.file)))
+            val label=device.findObject(By.textContains(title))
+            val info=device.findObjects(By.desc("查看文件路径")).minBy {kotlin.math.abs(it.visibleCenter.y-label.visibleCenter.y)}
+            info.click()
+            assertTrue(device.wait(Until.hasObject(By.textContains(chapter.file)),5000))
+        } finally {scenario.close();library.removeBook(book.id);library.file(chapter.file).parentFile!!.deleteRecursively()}
+    }
 }

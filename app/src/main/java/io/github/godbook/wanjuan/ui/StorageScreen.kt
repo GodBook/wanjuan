@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import io.github.godbook.wanjuan.AppModel
 import io.github.godbook.wanjuan.data.Storage
 import io.github.godbook.wanjuan.data.StorageEntry
@@ -23,6 +27,8 @@ fun formatBytes(bytes: Long)=if(bytes>=1024*1024) "%.1f MiB".format(bytes.toDoub
     var entries by remember {mutableStateOf<List<StorageEntry>>(emptyList())}
     var selected by remember {mutableStateOf<Set<String>>(emptySet())}
     var confirm by remember {mutableStateOf(false)}
+    var details by remember {mutableStateOf<Set<String>>(emptySet())}
+    var expanded by remember {mutableStateOf<Set<String>>(emptySet())}
     val busy by model.busy.collectAsState()
     fun refresh() {model.run {val next=storage.scan();withContext(Dispatchers.Main) {entries=next;selected=emptySet()}}}
     LaunchedEffect(Unit) {refresh()}
@@ -34,17 +40,24 @@ fun formatBytes(bytes: Long)=if(bytes>=1024*1024) "%.1f MiB".format(bytes.toDoub
         val chosen=entries.filter {it.path in selected}
         Button(enabled=selected.isNotEmpty() && !busy,onClick={confirm=true},modifier=Modifier.padding(24.dp,12.dp)) {Text("删除已选 ${chosen.size} 项 · ${formatBytes(chosen.sumOf {it.bytes})}")}
         LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(horizontal=16.dp,vertical=8.dp)) {
-            entries.groupBy {it.category}.forEach {(category,files) ->
+            val order=listOf("本地书籍","已下载正文","临时缓存","正在使用的字体与背景","未使用书籍文件","未使用资源")
+            entries.groupBy {it.category}.toList().sortedBy {order.indexOf(it.first)}.forEach {(category,files) ->
                 item(key=category) {
-                    Row(Modifier.fillMaxWidth().padding(8.dp),horizontalArrangement=Arrangement.SpaceBetween) {
-                        Text("$category · ${formatBytes(files.sumOf {it.bytes})}",style=MaterialTheme.typography.titleSmall)
+                    Row(Modifier.fillMaxWidth().clickable {expanded=if(category in expanded) expanded-category else expanded+category}.padding(8.dp),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {Text(category,style=MaterialTheme.typography.titleSmall);Text("${files.size} 个文件 · ${formatBytes(files.sumOf {it.bytes})}",style=MaterialTheme.typography.bodySmall,color=Muted)}
                         if(files.any {it.removable}) TextButton(enabled=!busy,onClick={val paths=files.filter {it.removable}.map {it.path}.toSet();selected=if(selected.containsAll(paths)) selected-paths else selected+paths}) {Text("选择此类")}
+                        IconButton(onClick={expanded=if(category in expanded) expanded-category else expanded+category}) {Icon(if(category in expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,"${if(category in expanded) "收起" else "展开"}$category")}
                     }
                 }
-                items(files,key={it.path}) {entry ->
+                if(category in expanded) items(files,key={it.path}) {entry ->
                     fun toggle() {selected=if(entry.path in selected) selected-entry.path else selected+entry.path}
-                    ListItem(headlineContent={Text(entry.path,maxLines=2)},supportingContent={Text(formatBytes(entry.bytes)+if(entry.removable) "" else " · 正在使用")},
+                    ListItem(headlineContent={Text(entry.label,maxLines=2,overflow=TextOverflow.Ellipsis)},supportingContent={Column {
+                        Text(formatBytes(entry.bytes)+if(entry.removable) "" else " · 正在使用")
+                        if(entry.references.isNotBlank()) Text(entry.references,style=MaterialTheme.typography.bodySmall)
+                        if(entry.path in details) Text(entry.path,style=MaterialTheme.typography.bodySmall)
+                    }},
                         leadingContent={Checkbox(entry.path in selected,{toggle()},enabled=entry.removable && !busy)},
+                        trailingContent={IconButton(onClick={details=if(entry.path in details) details-entry.path else details+entry.path}) {Icon(Icons.Outlined.Info,"查看文件路径")}},
                         modifier=Modifier.clickable(enabled=entry.removable && !busy) {toggle()})
                 }
             }

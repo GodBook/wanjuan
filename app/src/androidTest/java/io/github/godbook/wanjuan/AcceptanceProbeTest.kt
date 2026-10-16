@@ -87,6 +87,7 @@ class AcceptanceProbeTest {
         val file=File(context.cacheDir,"soak-${uid()}.txt")
         file.writeText((1..8).joinToString("\n") {"第${it}章 长时阅读\n"+"山间有风，书页安静翻过。".repeat(3000)})
         val book=BookImporter(library).importFile(file,"长时阅读验收.txt")
+        library.progress(book.id,0,0,"")
         val device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         device.wakeUp();device.executeShellCommand("wm dismiss-keyguard")
         val scenario=ActivityScenario.launch(MainActivity::class.java)
@@ -94,15 +95,17 @@ class AcceptanceProbeTest {
         val output=File(context.filesDir,"soak-result.json")
         try {
             library.saveProfile(Profile(awake=true))
-            scenario.onActivity {it.model.open(book)}
+            scenario.onActivity {it.model.open(book.copy(chapter=0,offset=0,anchor=""))}
             assertTrue(device.wait(Until.hasObject(By.descContains("山间有风")),20000))
             var turns=0;var round=0
             while(android.os.SystemClock.elapsedRealtime()-started<minutes*60000) {
+                assertEquals("离开万卷后停止测试触控",context.packageName,device.currentPackageName)
                 val mode=(round/60)%4
                 if(round%60==0) library.saveProfile(Profile(mode=mode,awake=true))
                 if(mode==3) device.swipe(device.displayWidth/2,(device.displayHeight*.65).toInt(),device.displayWidth/2,(device.displayHeight*.35).toInt(),12)
                 else {
                     device.click((device.displayWidth*.88).toInt(),device.displayHeight/2);delay(250)
+                    assertEquals("离开万卷后停止测试触控",context.packageName,device.currentPackageName)
                     device.click((device.displayWidth*.12).toInt(),device.displayHeight/2);turns+=2
                 }
                 if(round%20==0) {
