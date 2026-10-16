@@ -257,6 +257,7 @@ class UpdateReliabilityTest {
                 if(!device.hasObject(storageEntry)) {
                     assertEquals(context.packageName,device.currentPackageName)
                     device.swipe(device.displayWidth/2,(device.displayHeight*.75).toInt(),device.displayWidth/2,(device.displayHeight*.35).toInt(),25)
+                    device.waitForIdle()
                     device.wait(Until.hasObject(storageEntry),1000)
                 }
             }
@@ -265,9 +266,14 @@ class UpdateReliabilityTest {
                 val dump=File(context.cacheDir,"storage-settings-failure.xml");device.dumpWindowHierarchy(dump)
                 dump.readText().chunked(3000).forEach {android.util.Log.e("WanJuanAcceptance",it)}
             }
-            assertTrue("设置中应找到存储管理入口",storageVisible);device.findObject(storageEntry).click()
+            assertTrue("设置中应找到存储管理入口",storageVisible);device.waitForIdle();device.findObject(storageEntry).click()
             val title="${book.title} · ${chapter.title}"
-            assertTrue(device.wait(Until.hasObject(By.desc("展开本地书籍")),10000));device.findObject(By.desc("展开本地书籍")).click()
+            val categoryVisible=device.wait(Until.hasObject(By.desc("展开本地书籍")),10000)
+            if(!categoryVisible) {
+                val dump=File(context.cacheDir,"storage-category-failure.xml");device.dumpWindowHierarchy(dump)
+                dump.readText().chunked(3000).forEach {android.util.Log.e("WanJuanAcceptance",it)}
+            }
+            assertTrue("存储页应显示本地书籍分类",categoryVisible);device.findObject(By.desc("展开本地书籍")).click()
             if(!device.hasObject(By.textContains(title))) device.findObject(By.scrollable(true))?.scrollUntil(Direction.DOWN,Until.findObject(By.textContains(title)))
             val visible=device.wait(Until.hasObject(By.textContains(title)),15000)
             if(!visible) device.dumpWindowHierarchy(File(context.cacheDir,"storage-ui-failure.xml"))
