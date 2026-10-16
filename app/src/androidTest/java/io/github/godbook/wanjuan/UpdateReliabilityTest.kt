@@ -251,6 +251,7 @@ class UpdateReliabilityTest {
         val scenario=ActivityScenario.launch(MainActivity::class.java)
         try {
             assertTrue(device.wait(Until.hasObject(By.text("设置")),10000));device.findObject(By.text("设置")).click()
+            if(!device.hasObject(By.text("存储管理"))) device.findObject(By.scrollable(true))?.scrollUntil(Direction.DOWN,Until.findObject(By.text("存储管理")))
             assertTrue(device.wait(Until.hasObject(By.text("存储管理")),10000));device.findObject(By.text("存储管理")).click()
             val title="${book.title} · ${chapter.title}"
             assertTrue(device.wait(Until.hasObject(By.desc("展开本地书籍")),10000));device.findObject(By.desc("展开本地书籍")).click()
