@@ -112,22 +112,13 @@ import java.io.File
 @Composable fun SettingsScreen(model: AppModel,dark: Int,onDark: (Int)->Unit,encoding: String,onEncoding: (String)->Unit,onSources: ()->Unit,onDownloads: ()->Unit,onBackup: ()->Unit,onRestore: ()->Unit,onDav: ()->Unit,onUpdate: ()->Unit,onReaderSettings: ()->Unit,onStorage: ()->Unit) {
     LazyColumn {
         item {PageHeader("设置","按自己的习惯，读每一本书。")}
-        item {SectionLabel("阅读与外观")}
-        item {ActionRow("阅读设置",Icons.Outlined.TextFields,"字体、排版、主题与翻页",onReaderSettings)}
+        item {SectionLabel("阅读与外观");ActionRow("阅读设置",Icons.Outlined.TextFields,"字体、排版、主题与翻页",onReaderSettings)}
         item {Row(Modifier.padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf("跟随系统","浅色","深色").forEachIndexed { i,label -> FilterChip(dark==i,{onDark(i)},label={Text(label)})}}}
-        item {SectionLabel("书库管理")}
-        item {ActionRow("书源管理",Icons.Outlined.Dns,"导入与管理多个书源",onSources)}
-        item {ActionRow("离线下载",Icons.Outlined.Download,"查看队列、暂停与继续",onDownloads)}
-        item {ActionRow("清理临时缓存",Icons.Outlined.CleaningServices,"保留本地书籍和明确下载的章节") {model.run("临时缓存已清理") {model.library.trimCache(0)}}}
+        item {SectionLabel("书库管理");ActionRow("书源管理",Icons.Outlined.Dns,"导入与管理多个书源",onSources);ActionRow("离线下载",Icons.Outlined.Download,"查看队列、暂停与继续",onDownloads);ActionRow("清理临时缓存",Icons.Outlined.CleaningServices,"保留本地书籍和明确下载的章节") {model.run("临时缓存已清理") {model.library.trimCache(0)}}}
         item {ActionRow("存储管理",Icons.Outlined.Storage,"查看占用，选择删除下载和未使用文件",onStorage)}
-        item {Text("TXT 导入编码",Modifier.padding(24.dp,8.dp),style=MaterialTheme.typography.bodyMedium)}
-        item {Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf("自动","UTF-8","GB18030","UTF-16LE","UTF-16BE").forEach { e -> FilterChip(encoding==e,{onEncoding(e)},label={Text(e)})}}}
-        item {SectionLabel("备份与恢复")}
-        item {ActionRow("导出备份",Icons.Outlined.SaveAlt,"本地书籍、书源、笔记、设置，可含已下载正文",onBackup)}
-        item {ActionRow("从文件恢复",Icons.Outlined.Restore,"校验后恢复完整快照",onRestore)}
-        item {ActionRow("WebDAV 备份",Icons.Outlined.CloudUpload,"使用你自己的云端存储",onDav)}
-        item {SectionLabel("关于万卷")}
-        item {ActionRow("检查更新",Icons.Outlined.SystemUpdate,"当前版本 ${BuildConfig.VERSION_NAME}",onUpdate)}
+        item {Text("TXT 导入编码",Modifier.padding(24.dp,8.dp),style=MaterialTheme.typography.bodyMedium);Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal=24.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf("自动","UTF-8","GB18030","UTF-16LE","UTF-16BE").forEach { e -> FilterChip(encoding==e,{onEncoding(e)},label={Text(e)})}}}
+        item {SectionLabel("备份与恢复");ActionRow("导出备份",Icons.Outlined.SaveAlt,"本地书籍、书源、笔记、设置，可含已下载正文",onBackup);ActionRow("从文件恢复",Icons.Outlined.Restore,"校验后恢复完整快照",onRestore);ActionRow("WebDAV 备份",Icons.Outlined.CloudUpload,"使用你自己的云端存储",onDav)}
+        item {SectionLabel("关于万卷");ActionRow("检查更新",Icons.Outlined.SystemUpdate,"当前版本 ${BuildConfig.VERSION_NAME}",onUpdate)}
         item {Text("本地优先 · 无需账号\n内置经典书源，支持导入更多来源。\n书源兼容范围请查看仓库文档。",Modifier.padding(24.dp),color=Muted,style=MaterialTheme.typography.bodySmall)}
     }
 }

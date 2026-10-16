@@ -1,5 +1,6 @@
 package io.github.godbook.wanjuan
 
+import android.graphics.Point
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -256,7 +257,11 @@ class UpdateReliabilityTest {
             repeat(8) {
                 if(!device.hasObject(storageEntry)) {
                     assertEquals(context.packageName,device.currentPackageName)
-                    device.swipe(device.displayWidth/2,(device.displayHeight*.75).toInt(),device.displayWidth/2,(device.displayHeight*.35).toInt(),25)
+                    val start=Point(device.displayWidth/2,(device.displayHeight*.75).toInt())
+                    val end=Point(device.displayWidth/2,(device.displayHeight*.35).toInt())
+                    // Hold at the end before lifting: a fling consumes the next tap to stop
+                    // scrolling even when accessibility already reports the row as visible.
+                    device.swipe(arrayOf(start,end,end),100)
                     device.waitForIdle()
                     device.wait(Until.hasObject(storageEntry),1000)
                 }

@@ -49,6 +49,6 @@ keyPassword=YOUR_LOCAL_SECRET
 
 ## GitHub Actions
 
-CI 构建调试包、运行 JVM 测试和 Android Lint。发布工作流使用仓库 Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEY_PASSWORD`。密钥别名为 `wanjuan`，密钥与仓库密码相同。工作流只接受手动指定的版本，构建后上传草稿 Release APK 与清单。完成设备验证后发布草稿，应用才会收到更新。
+CI 构建调试包、运行 JVM 测试和 Android Lint，并在标准 Android 10 / API 29 模拟器运行离线设备回归；真实书源、长时阅读和规模探针需另行显式执行。发布工作流使用仓库 Secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEY_PASSWORD`。密钥别名为 `wanjuan`，密钥与仓库密码相同。工作流只接受手动指定的版本，构建后上传草稿 Release APK 与清单；同版本仍为草稿时可更新目标提交和资产，已公开版本拒绝覆盖。完成设备验证后发布草稿，应用才会收到更新。
 
 PR 不接触发布密钥。删除或更换 Secrets 前先验证有可恢复的离线密钥副本。不要删除旧版 Release，现有用户可能仍需下载。
